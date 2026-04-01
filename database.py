@@ -61,6 +61,17 @@ def init_db():
             ("dispon[iií]vel", r"\b[A-Za-z]{3}\d[A-Za-z\d]\d{2}\b")
         )
 
+    # Migração segura para adicionar novas colunas da Evolution API
+    try:
+        cursor.execute("ALTER TABLE config ADD COLUMN evo_url TEXT DEFAULT ''")
+    except sqlite3.OperationalError: pass
+    try:
+        cursor.execute("ALTER TABLE config ADD COLUMN evo_instance TEXT DEFAULT ''")
+    except sqlite3.OperationalError: pass
+    try:
+        cursor.execute("ALTER TABLE config ADD COLUMN evo_apikey TEXT DEFAULT ''")
+    except sqlite3.OperationalError: pass
+
     conn.commit()
     conn.close()
 

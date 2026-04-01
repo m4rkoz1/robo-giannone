@@ -8,3 +8,6 @@ class UserLogin(BaseModel):
 class ConfigUpdate(BaseModel):
     regex_placa: str
     palavra_chave: str
+    evo_url: Optional[str] = ""
+    evo_instance: Optional[str] = ""
+    evo_apikey: Optional[str] = ""

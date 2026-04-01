@@ -88,20 +88,43 @@
 
                     <!-- Tab Configs (Admin) -->
                     <section id="tab-configs" class="tab-content hidden glass-card mt-4">
-                        <h3>Regras do Webhook</h3>
-                        <p class="subtitle">Atenção: Apenas altere se souber o que está fazendo. Aceita formatação Regex.</p>
-                        <form id="config-form" class="mt-4">
-                            <div class="input-group">
-                                <label>Palavra-Chave de Disponibilidade</label>
-                                <input type="text" id="config-palavra">
+                        <div class="split-view">
+                            <div class="form-area">
+                                <h3>Regras do Webhook</h3>
+                                <p class="subtitle">Aceita formatação Regex.</p>
+                                <form id="config-form" class="mt-4">
+                                    <div class="input-group">
+                                        <label>Palavra-Chave</label>
+                                        <input type="text" id="config-palavra">
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>Padrão de Placa</label>
+                                        <input type="text" id="config-regex">
+                                    </div>
+
+                                    <h3 class="mt-4">Configuração Evolution API</h3>
+                                    <div class="input-group mt-2">
+                                        <label>URL Base da Evolution</label>
+                                        <input type="text" id="evo-url" placeholder="http://api.site.com">
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>Nome da Instância</label>
+                                        <input type="text" id="evo-instance">
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>Global API Key</label>
+                                        <input type="password" id="evo-apikey">
+                                    </div>
+                                    <button type="submit" class="btn primary mt-4">Salvar Configurações</button>
+                                    <span id="config-msg" class="success-msg ml-2"></span>
+                                </form>
                             </div>
-                            <div class="input-group mt-2">
-                                <label>Padrão de Placa</label>
-                                <input type="text" id="config-regex">
+                            <div class="list-area pl-4">
+                                <h3>Sincronizar Webhook</h3>
+                                <p class="helper">Avisar a Evolution para mandar mensagens para nós.</p>
+                                <button onclick="syncEvo()" class="btn secondary mt-4">Sincronizar Automaticamente</button>
                             </div>
-                            <button type="submit" class="btn primary mt-4">Salvar Regras</button>
-                            <span id="config-msg" class="success-msg ml-2"></span>
-                        </form>
+                        </div>
                     </section>
 
                     <!-- Tab Usuarios (Admin) -->
@@ -264,25 +287,54 @@
         async function loadConfig() {
             if(role !== 'admin') return;
             const config = await fetchAPI('/api/config');
-            document.getElementById('config-palavra').value = config.palavra_chave;
-            document.getElementById('config-regex').value = config.regex_placa;
+            document.getElementById('config-palavra').value = config.palavra_chave || '';
+            document.getElementById('config-regex').value = config.regex_placa || '';
+            document.getElementById('evo-url').value = config.evo_url || '';
+            document.getElementById('evo-instance').value = config.evo_instance || '';
+            document.getElementById('evo-apikey').value = config.evo_apikey || '';
         }
 
         document.getElementById('config-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const palavra = document.getElementById('config-palavra').value;
             const regex = document.getElementById('config-regex').value;
+            const evoUrl = document.getElementById('evo-url').value;
+            const evoInst = document.getElementById('evo-instance').value;
+            const evoKey = document.getElementById('evo-apikey').value;
+            
             try {
                 await fetchAPI('/api/config', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({palavra_chave: palavra, regex_placa: regex})
+                    body: JSON.stringify({
+                        palavra_chave: palavra, 
+                        regex_placa: regex,
+                        evo_url: evoUrl,
+                        evo_instance: evoInst,
+                        evo_apikey: evoKey
+                    })
                 });
                 const msg = document.getElementById('config-msg');
                 msg.textContent = 'Salvo com sucesso!';
                 setTimeout(()=> msg.textContent='', 3000);
             } catch(e) { alert('Erro ao salvar config: ' + e.message); }
         });
+
+        async function syncEvo() {
+            const btn = event.target;
+            const original = btn.textContent;
+            btn.textContent = "Sincronizando...";
+            try {
+                const urlAtual = window.location.origin; // ex: https://111-robogiannone...
+                const res = await fetchAPI('/api/evolution/sync', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ meu_link: urlAtual })
+                });
+                alert(res.status || 'Webhook conectado automaticamente!');
+            } catch(e) { alert('Erro: ' + e.message); }
+            btn.textContent = original;
+        }
 
         // Users Management
         async function loadUsers() {

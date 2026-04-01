@@ -73,9 +73,9 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 @app.get("/api/config")
 async def get_config(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
-    config = conn.execute("SELECT palavra_chave, regex_placa FROM config LIMIT 1").fetchone()
+    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
     conn.close()
-    return dict(config)
+    return config
 
 @app.post("/api/config")
 async def update_config(config_data: ConfigUpdate, current_user: dict = Depends(get_current_user)):
@@ -83,10 +83,45 @@ async def update_config(config_data: ConfigUpdate, current_user: dict = Depends(
         raise HTTPException(status_code=403, detail="Apenas admins podem alterar regras.")
     
     conn = get_db_connection()
-    conn.execute("UPDATE config SET palavra_chave = ?, regex_placa = ?", (config_data.palavra_chave, config_data.regex_placa))
+    conn.execute(
+        "UPDATE config SET palavra_chave = ?, regex_placa = ?, evo_url = ?, evo_instance = ?, evo_apikey = ?", 
+        (config_data.palavra_chave, config_data.regex_placa, config_data.evo_url, config_data.evo_instance, config_data.evo_apikey)
+    )
     conn.commit()
     conn.close()
     return {"status": "Configurações atualizadas com sucesso!"}
+
+from pydantic import BaseModel
+class SyncData(BaseModel):
+    meu_link: str
+
+import requests
+@app.post("/api/evolution/sync")
+async def sync_evolution(data: SyncData, current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin": raise HTTPException(status_code=403)
+    conn = get_db_connection()
+    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone())
+    conn.close()
+    if not config.get('evo_url') or not config.get('evo_instance') or not config.get('evo_apikey'):
+        raise HTTPException(status_code=400, detail="Configure a API primeiro.")
+    
+    url = f"{config['evo_url'].rstrip('/')}/webhook/set/{config['evo_instance']}"
+    headers = {"apikey": config['evo_apikey'], "Content-Type": "application/json"}
+    payload = {
+        "webhook": {
+            "enabled": True,
+            "url": f"{data.meu_link.rstrip('/')}/webhook/evolution",
+            "webhookByEvents": False,
+            "webhookBase64": False,
+            "events": ["MESSAGES_UPSERT"]
+        }
+    }
+    try:
+        r = requests.post(url, json=payload, headers=headers)
+        r.raise_for_status()
+        return {"status": "Webhook sincronizado na Evolution API!"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/users")
 async def list_users(current_user: dict = Depends(get_current_user)):
