@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+requests
+passlib
+bcrypt
+pyjwt
+jinja2
+python-multipart

@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel - Giannone Transportes</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app-container">
+        <!-- Tela de Login -->
+        <main id="login-screen" class="screen active">
+            <div class="glass-card login-box">
+                <div class="logo">
+                    <div class="logo-icon">🚛</div>
+                    <h2>Giannone Transportes</h2>
+                    <p>Agente Operacional Inteligente</p>
+                </div>
+                <form id="login-form">
+                    <div class="input-group">
+                        <label>Usuário</label>
+                        <input type="text" id="username" required autocomplete="username">
+                    </div>
+                    <div class="input-group">
+                        <label>Senha</label>
+                        <input type="password" id="password" required autocomplete="current-password">
+                    </div>
+                    <p id="login-error" class="error-msg"></p>
+                    <button type="submit" class="btn primary">Acessar Painel</button>
+                </form>
+            </div>
+        </main>
+
+        <!-- Dashboard -->
+        <main id="dashboard-screen" class="screen hidden">
+            <nav class="sidebar glass-card">
+                <div class="sidebar-header">
+                    <div class="logo-icon small">🚛</div>
+                    <h3>Giannone</h3>
+                </div>
+                <ul class="nav-links">
+                    <li><button onclick="switchTab('lista')" class="nav-btn active">📑 Lista Diária</button></li>
+                    <li id="nav-configs"><button onclick="switchTab('configs')" class="nav-btn">⚙️ Configurações</button></li>
+                    <li id="nav-users"><button onclick="switchTab('users')" class="nav-btn">👥 Usuários</button></li>
+                </ul>
+                <div class="sidebar-footer">
+                    <button onclick="logout()" class="btn outline danger">Sair</button>
+                </div>
+            </nav>
+
+            <div class="dashboard-content">
+                <header class="topbar">
+                    <h2 id="page-title">Lista de Veículos Disponíveis</h2>
+                    <div class="user-info">
+                        <span id="welcome-msg"></span>
+                    </div>
+                </header>
+
+                <div class="scroll-area">
+                    <!-- Tab Lista -->
+                    <section id="tab-lista" class="tab-content active">
+                        <div class="filters glass-card">
+                            <div class="input-group row-align">
+                                <label>Selecionar Data:</label>
+                                <input type="date" id="filter-date" onchange="loadVeiculos()">
+                                <button onclick="loadVeiculos()" class="btn secondary">Atualizar Grelha</button>
+                            </div>
+                        </div>
+
+                        <div class="table-container glass-card mt-4">
+                            <table id="veiculos-table">
+                                <thead>
+                                    <tr>
+                                        <th>Motorista</th>
+                                        <th>WhatsApp</th>
+                                        <th>Placa</th>
+                                        <th>Horário</th>
+                                        <th>Grupo/Origem</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- JS Renderiza -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <!-- Tab Configs (Admin) -->
+                    <section id="tab-configs" class="tab-content hidden glass-card mt-4">
+                        <h3>Regras do Webhook</h3>
+                        <p class="subtitle">Atenção: Apenas altere se souber o que está fazendo. Aceita formatação Regex.</p>
+                        <form id="config-form" class="mt-4">
+                            <div class="input-group">
+                                <label>Palavra-Chave de Disponibilidade</label>
+                                <input type="text" id="config-palavra">
+                            </div>
+                            <div class="input-group mt-2">
+                                <label>Padrão de Placa</label>
+                                <input type="text" id="config-regex">
+                            </div>
+                            <button type="submit" class="btn primary mt-4">Salvar Regras</button>
+                            <span id="config-msg" class="success-msg ml-2"></span>
+                        </form>
+                    </section>
+
+                    <!-- Tab Usuarios (Admin) -->
+                    <section id="tab-users" class="tab-content hidden glass-card mt-4">
+                        <div class="split-view">
+                            <div class="form-area">
+                                <h3>Criar Novo Usuário</h3>
+                                <form id="user-form" class="mt-4">
+                                    <div class="input-group">
+                                        <label>Nome do Usuário</label>
+                                        <input type="text" id="new-username" required>
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>Nível de Acesso</label>
+                                        <select id="new-role">
+                                            <option value="viewer">Visualizador (Apenas lê lista)</option>
+                                            <option value="admin">Administrador (Altera configurações)</option>
+                                        </select>
+                                    </div>
+                                    <p class="helper">A senha inicial gerada será "giannone123"</p>
+                                    <button type="submit" class="btn primary mt-2">Criar Acesso</button>
+                                </form>
+                            </div>
+                            <div class="list-area pl-4">
+                                <h3>Usuários Ativos</h3>
+                                <div id="users-list" class="mt-4">
+                                    <!-- JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts da Página -->
+    <script>
+        let currentUser = null;
+        let token = localStorage.getItem('access_token');
+        let role = localStorage.getItem('role');
+
+        document.getElementById('filter-date').valueAsDate = new Date();
+
+        // Inicialização
+        if (token) {
+            showDashboard();
+        }
+
+        // Login Submit
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            const err = document.getElementById('login-error');
+            
+            const formData = new FormData();
+            formData.append('username', u);
+            formData.append('password', p);
+
+            try {
+                const res = await fetch('/token', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                
+                if (!res.ok) throw new Error(data.detail || 'Erro ao logar');
+                
+                localStorage.setItem('access_token', data.access_token);
+                localStorage.setItem('role', data.role);
+                token = data.access_token;
+                role = data.role;
+                currentUser = u;
+                
+                showDashboard();
+            } catch (error) {
+                err.textContent = error.message;
+            }
+        });
+
+        function showDashboard() {
+            document.getElementById('login-screen').classList.remove('active');
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard-screen').classList.remove('hidden');
+            document.getElementById('dashboard-screen').classList.add('active');
+
+            document.getElementById('welcome-msg').textContent = `Olá`;
+
+            if (role !== 'admin') {
+                document.getElementById('nav-configs').style.display = 'none';
+                document.getElementById('nav-users').style.display = 'none';
+            } else {
+                document.getElementById('nav-configs').style.display = 'block';
+                document.getElementById('nav-users').style.display = 'block';
+                loadConfig();
+                loadUsers();
+            }
+            loadVeiculos();
+        }
+
+        function logout() {
+            localStorage.clear();
+            location.reload();
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(t => {
+                t.classList.remove('active');
+                t.classList.add('hidden');
+            });
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            
+            event.currentTarget.classList.add('active');
+            const target = document.getElementById('tab-' + tabId);
+            target.classList.remove('hidden');
+            target.classList.add('active');
+            
+            switch(tabId) {
+                case 'lista': document.getElementById('page-title').textContent = 'Lista de Veículos Disponíveis'; break;
+                case 'configs': document.getElementById('page-title').textContent = 'Configurações de Leitura Webhook'; break;
+                case 'users': document.getElementById('page-title').textContent = 'Gerenciamento de Painel'; break;
+            }
+        }
+
+        // API Calls with Auth Header
+        async function fetchAPI(endpoint, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
+            const req = await fetch(endpoint, options);
+            if(req.status === 401) { logout(); return; }
+            if(!req.ok) throw new Error(await req.text());
+            return req.json();
+        }
+
+        async function loadVeiculos() {
+            const date = document.getElementById('filter-date').value;
+            const tb = document.querySelector('#veiculos-table tbody');
+            tb.innerHTML = '<tr><td colspan="5" class="text-center">Carregando...</td></tr>';
+            try {
+                const data = await fetchAPI(`/api/disponiveis?dia=${date}`);
+                tb.innerHTML = '';
+                if(data.length === 0) {
+                    tb.innerHTML = '<tr><td colspan="5" class="text-center">Nenhum veículo registrado neste dia.</td></tr>';
+                    return;
+                }
+                data.forEach(v => {
+                    tb.innerHTML += `
+                        <tr>
+                            <td><strong>${v.motorista}</strong></td>
+                            <td><a class="wpp-link" href="https://wa.me/${v.telefone}" target="_blank">📱 ${v.telefone}</a></td>
+                            <td><span class="badge-placa">${v.placa}</span></td>
+                            <td><span class="badge-hora">${v.horario_mensagem}</span></td>
+                            <td>${v.grupo}</td>
+                        </tr>
+                    `;
+                });
+            } catch(e) { tb.innerHTML = `<tr><td colspan="5" class="error-msg text-center">Erro ao carregar</td></tr>`; }
+        }
+
+        async function loadConfig() {
+            if(role !== 'admin') return;
+            const config = await fetchAPI('/api/config');
+            document.getElementById('config-palavra').value = config.palavra_chave;
+            document.getElementById('config-regex').value = config.regex_placa;
+        }
+
+        document.getElementById('config-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const palavra = document.getElementById('config-palavra').value;
+            const regex = document.getElementById('config-regex').value;
+            try {
+                await fetchAPI('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({palavra_chave: palavra, regex_placa: regex})
+                });
+                const msg = document.getElementById('config-msg');
+                msg.textContent = 'Salvo com sucesso!';
+                setTimeout(()=> msg.textContent='', 3000);
+            } catch(e) { alert('Erro ao salvar config: ' + e.message); }
+        });
+
+        // Users Management
+        async function loadUsers() {
+            if(role !== 'admin') return;
+            const list = document.getElementById('users-list');
+            try {
+                const users = await fetchAPI('/api/users');
+                list.innerHTML = '';
+                users.forEach(u => {
+                    list.innerHTML += `
+                        <div class="user-card mt-2">
+                            <div>
+                                <strong>${u.username}</strong>
+                                <span class="badge-role ${u.role}">${u.role}</span>
+                            </div>
+                            <button onclick="delUser(${u.id})" class="btn danger small">🗑️</button>
+                        </div>
+                    `;
+                });
+            } catch(e) {}
+        }
+
+        document.getElementById('user-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const u = document.getElementById('new-username').value;
+            const r = document.getElementById('new-role').value;
+            try {
+                await fetchAPI(`/api/users?username=${u}&role=${r}`, { method: 'POST' });
+                document.getElementById('user-form').reset();
+                loadUsers();
+            } catch(e) { alert('Erro: ' + e.message); }
+        });
+
+        async function delUser(id) {
+            if(!confirm('Deletar usuário?')) return;
+            try {
+                await fetchAPI(`/api/users/${id}`, { method: 'DELETE' });
+                loadUsers();
+            } catch(e) { alert('Erro ao deletar'); }
+        }
+    </script>
+</body>
+</html>
