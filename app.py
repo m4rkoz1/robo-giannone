@@ -54,7 +54,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 # --------- ROTAS DE FRONTEND ---------
 @app.get("/")
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="index.html")
 
 # --------- ROTAS DE AUTENTICAÇÃO ---------
 @app.post("/token")
