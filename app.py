@@ -172,7 +172,9 @@ async def listar_disponiveis(dia: str = None, current_user: dict = Depends(get_c
 async def webhook_evolution(request: Request):
     try:
         payload = await request.json()
-        if payload.get("event") == "messages.upsert":
+        evento = payload.get("event", "")
+        # Aceita Evolution (messages.upsert) e WAHA (message / message.any)
+        if evento == "messages.upsert" or str(evento).startswith("message"):
            processar_mensagem_webhook(payload)
         return {"status": "ok"}
     except Exception as e:
@@ -201,13 +203,33 @@ def processar_mensagem_webhook(payload: dict):
     regex_disp = re.compile(config["palavra_chave"], re.IGNORECASE)
     regex_placa = re.compile(config["regex_placa"])
     
-    data = payload.get("data", {})
-    remote_jid = data.get("key", {}).get("remoteJid", "")
-    if data.get("key", {}).get("fromMe", False): return
+    is_waha = "payload" in payload and str(payload.get("event", "")).startswith("message")
     
-    message_content = data.get("message", {})
-    texto_original = message_content.get("conversation", message_content.get("extendedTextMessage", {}).get("text", ""))
-    if not texto_original: return
+    if is_waha:
+        data = payload.get("payload", {})
+        if data.get("fromMe", False): return
+        remote_jid = data.get("from", "")
+        texto_original = data.get("body", "")
+        timestamp_msg = data.get("timestamp")
+        
+        telefone_bruto = data.get("author") or data.get("participant") or remote_jid
+        _meta = data.get("_data", {})
+        motorista = _meta.get("notifyName") or data.get("pushName") or "Desconhecido"
+    else:
+        data = payload.get("data", {})
+        remote_jid = data.get("key", {}).get("remoteJid", "")
+        if data.get("key", {}).get("fromMe", False): return
+        
+        message_content = data.get("message", {})
+        texto_original = message_content.get("conversation", message_content.get("extendedTextMessage", {}).get("text", ""))
+        
+        telefone_bruto = data.get("participant") or data.get("key", {}).get("participant", "") or remote_jid
+        if "sender" in data:
+            telefone_bruto = data["sender"]
+        timestamp_msg = data.get("messageTimestamp")
+        motorista = data.get("pushName", "Desconhecido")
+        
+    if not texto_original or not remote_jid: return
     
     # Valida regras
     if not regex_disp.search(texto_original): return
@@ -215,17 +237,9 @@ def processar_mensagem_webhook(payload: dict):
     if not placa_match: return
     
     placa = placa_match.group(0).upper()
-    telefone = data.get("participant") or data.get("key", {}).get("participant", "") or remote_jid
-    # Remove as marcações de JID ocultos, de dispositivos multiplos e etc
-    telefone = telefone.split("@")[0].split(":")[0]  
+    telefone = telefone_bruto.split("@")[0].split(":")[0]  
     
-    # Tentativa de pegar o número real caso seja um grupo de comunidade (que mascara a ID)
-    if "sender" in data:
-        telefone = data["sender"].split("@")[0].split(":")[0]
-    
-    motorista = data.get("pushName", "Desconhecido")
-    
-    # ------------------ PEGA O NOME REAL DO GRUPO (Evolution API) ------------------
+    # ------------------ PEGA O NOME REAL DO GRUPO (Evolution API / WAHA) ------------------
     if "@g.us" in remote_jid:
         grupo = obter_nome_grupo(remote_jid, config)
     else:
