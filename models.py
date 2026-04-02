@@ -11,3 +11,4 @@ class ConfigUpdate(BaseModel):
     evo_url: Optional[str] = ""
     evo_instance: Optional[str] = ""
     evo_apikey: Optional[str] = ""
+    msg_erro_placa: Optional[str] = ""

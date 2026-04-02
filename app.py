@@ -84,8 +84,8 @@ async def update_config(config_data: ConfigUpdate, current_user: dict = Depends(
     
     conn = get_db_connection()
     conn.execute(
-        "UPDATE config SET palavra_chave = ?, regex_placa = ?, evo_url = ?, evo_instance = ?, evo_apikey = ?", 
-        (config_data.palavra_chave, config_data.regex_placa, config_data.evo_url, config_data.evo_instance, config_data.evo_apikey)
+        "UPDATE config SET palavra_chave = ?, regex_placa = ?, evo_url = ?, evo_instance = ?, evo_apikey = ?, msg_erro_placa = ?", 
+        (config_data.palavra_chave, config_data.regex_placa, config_data.evo_url, config_data.evo_instance, config_data.evo_apikey, config_data.msg_erro_placa)
     )
     conn.commit()
     conn.close()
@@ -385,8 +385,10 @@ def processar_mensagem_webhook(payload: dict):
             placa = tres_letras_validas[0].upper()
             
     if not placa:
-        # 3. Retende exigir placa se a mensagem só disse "disponível"
-        enviar_reposta(remote_jid, "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso.", config)
+        # 3. Responde exigindo a placa se o admin escreveu uma mensagem pra isso. Do contrário, usa default
+        msg_alerta = config.get("msg_erro_placa", "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso.")
+        if msg_alerta:
+            enviar_reposta(remote_jid, msg_alerta, config)
         return
     telefone = telefone_bruto.split("@")[0].split(":")[0]  
     
