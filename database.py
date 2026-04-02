@@ -82,6 +82,11 @@ def init_db():
         cursor.execute("ALTER TABLE veiculos ADD COLUMN message_id TEXT DEFAULT ''")
     except sqlite3.OperationalError: pass
 
+    # Migração da coluna msg_erro_placa (Auto-Responder)
+    try:
+        cursor.execute("ALTER TABLE config ADD COLUMN msg_erro_placa TEXT DEFAULT ''")
+    except sqlite3.OperationalError: pass
+
     # Migração LLM (IA OpenRouter)
     try:
         cursor.execute("ALTER TABLE config ADD COLUMN llm_api_key TEXT DEFAULT ''")
