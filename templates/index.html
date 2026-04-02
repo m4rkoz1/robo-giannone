@@ -68,21 +68,8 @@
                             </div>
                         </div>
 
-                        <div class="table-container glass-card mt-4">
-                            <table id="veiculos-table">
-                                <thead>
-                                    <tr>
-                                        <th>Motorista</th>
-                                        <th>WhatsApp</th>
-                                        <th>Placa</th>
-                                        <th>Horário</th>
-                                        <th>Grupo/Origem</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- JS Renderiza -->
-                                </tbody>
-                            </table>
+                        <div class="groups-container mt-4" id="veiculos-grid">
+                            <!-- JS Renderiza Cards por Grupo -->
                         </div>
                     </section>
 
@@ -261,27 +248,45 @@
 
         async function loadVeiculos() {
             const date = document.getElementById('filter-date').value;
-            const tb = document.querySelector('#veiculos-table tbody');
-            tb.innerHTML = '<tr><td colspan="5" class="text-center">Carregando...</td></tr>';
+            const grid = document.getElementById('veiculos-grid');
+            grid.innerHTML = '<div class="text-center w-100">Carregando...</div>';
             try {
                 const data = await fetchAPI(`/api/disponiveis?dia=${date}`);
-                tb.innerHTML = '';
+                grid.innerHTML = '';
                 if(data.length === 0) {
-                    tb.innerHTML = '<tr><td colspan="5" class="text-center">Nenhum veículo registrado neste dia.</td></tr>';
+                    grid.innerHTML = '<div class="glass-card p-4 text-center">Nenhum veículo registrado neste dia.</div>';
                     return;
                 }
+                
+                // Agrupar por grupo
+                const grouped = {};
                 data.forEach(v => {
-                    tb.innerHTML += `
-                        <tr>
-                            <td><strong>${v.motorista}</strong></td>
-                            <td><a class="wpp-link" href="https://wa.me/${v.telefone}" target="_blank">📱 ${v.telefone}</a></td>
-                            <td><span class="badge-placa">${v.placa}</span></td>
-                            <td><span class="badge-hora">${v.horario_mensagem}</span></td>
-                            <td>${v.grupo}</td>
-                        </tr>
-                    `;
+                    if(!grouped[v.grupo]) grouped[v.grupo] = [];
+                    grouped[v.grupo].push(v);
                 });
-            } catch(e) { tb.innerHTML = `<tr><td colspan="5" class="error-msg text-center">Erro ao carregar</td></tr>`; }
+
+                // Renderizar Cards Individuais usando CSS Grid
+                for (const [nomeGrupo, veiculos] of Object.entries(grouped)) {
+                    let itemsHtml = veiculos.map(v => `
+                        <div class="veiculo-item">
+                            <div class="v-header">
+                                <strong>${v.motorista}</strong>
+                                <span class="badge-hora">${v.horario_mensagem}</span>
+                            </div>
+                            <div class="v-body">
+                                <span class="badge-placa">${v.placa}</span>
+                                <a class="wpp-link" href="https://wa.me/${v.telefone}" target="_blank">📱 ${v.telefone}</a>
+                            </div>
+                        </div>`).join('');
+                        
+                    grid.innerHTML += `
+                        <div class="glass-card group-card">
+                            <h3 class="group-title">${nomeGrupo}</h3>
+                            <div class="group-items">${itemsHtml}</div>
+                        </div>
+                    `;
+                }
+            } catch(e) { grid.innerHTML = `<div class="error-msg text-center">Erro ao carregar</div>`; }
         }
 
         async function loadConfig() {

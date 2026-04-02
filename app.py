@@ -1,6 +1,6 @@
 import sqlite3
 import re
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
@@ -199,11 +199,21 @@ def processar_mensagem_webhook(payload: dict):
     if not placa_match: return
     
     placa = placa_match.group(0).upper()
-    telefone = data.get("key", {}).get("participant", "").split("@")[0] or remote_jid.split("@")[0]
-    motorista = data.get("pushName", "Desconhecido")
-    grupo = remote_jid if "@" in remote_jid else "Privado"
+    telefone = data.get("key", {}).get("participant", "") or remote_jid
+    telefone = telefone.split("@")[0].split(":")[0]  # Remove :xx de instâncias multi-device e tira o @s.whatsapp
     
-    dt_hora = datetime.fromtimestamp(data.get("messageTimestamp", int(datetime.now().timestamp())))
+    motorista = data.get("pushName", "Desconhecido")
+    
+    if "@g.us" in remote_jid:
+        base_id = remote_jid.split("@")[0]
+        grupo = f"Grupo ({base_id[-4:]})" # Como o Webhook não manda o nome do grupo, usamos os ultimos 4 digitos
+    else:
+        grupo = "Chat Privado"
+    
+    agora_sp = datetime.now(timezone(timedelta(hours=-3)))
+    timestamp_msg = data.get("messageTimestamp", int(agora_sp.timestamp()))
+    dt_hora = datetime.fromtimestamp(timestamp_msg, tz=timezone(timedelta(hours=-3)))
+    
     data_operacao = dt_hora.strftime("%Y-%m-%d")
     horario_mensagem = dt_hora.strftime("%H:%M:%S")
     
