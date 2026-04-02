@@ -58,7 +58,7 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         cursor.execute(
             "INSERT INTO config (palavra_chave, regex_placa) VALUES (?, ?)",
-            ("dispon[iií]vel", r"\b[A-Za-z]{3}\d[A-Za-z\d]\d{2}\b")
+            ("dispon[ií]vel|indispon[ií]vel", r"\b[A-Za-z]{3}[-\s]*\d[A-Za-z\d]\d{2}\b")
         )
 
     # Migração segura para adicionar novas colunas da Evolution API
@@ -70,6 +70,11 @@ def init_db():
     except sqlite3.OperationalError: pass
     try:
         cursor.execute("ALTER TABLE config ADD COLUMN evo_apikey TEXT DEFAULT ''")
+    except sqlite3.OperationalError: pass
+
+    # Migração da coluna Status na tabela veiculos
+    try:
+        cursor.execute("ALTER TABLE veiculos ADD COLUMN status TEXT DEFAULT 'Disponível'")
     except sqlite3.OperationalError: pass
 
     conn.commit()

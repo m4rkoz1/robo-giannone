@@ -111,8 +111,9 @@
                             </div>
                             <div class="list-area pl-4">
                                 <h3>Ferramentas WAHA</h3>
-                                <p class="helper">Teste sua conexão após preencher URL e Sessão.</p>
+                                <p class="helper">Teste sua conexão ou recupere mensagens passadas.</p>
                                 <button type="button" onclick="pingWaha(this)" class="btn secondary mt-2" id="pingwaha">📡 Testar Conexão WAHA</button>
+                                <button type="button" onclick="syncWaha(this)" class="btn secondary mt-2" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd;">🔄 Puxar Mensagens (Histórico)</button>
                                 
                                 <h3 class="mt-5 border-t pt-4">Monitor do Webhook</h3>
                                 <p class="helper" style="margin-bottom:0.8rem">Momento do último sinal recebido:</p>
@@ -278,7 +279,12 @@
 
                 // Renderizar Cards Individuais usando CSS Grid
                 for (const [nomeGrupo, veiculos] of Object.entries(grouped)) {
-                    let itemsHtml = veiculos.map(v => `
+                    let itemsHtml = veiculos.map(v => {
+                        let statusHtml = v.status === 'Indisponível' 
+                            ? `<span class="badge-status indisp">🔴 Indisponível</span>`
+                            : `<span class="badge-status disp">🟢 Disponível</span>`;
+                            
+                        return `
                         <div class="veiculo-item">
                             <div class="v-header">
                                 <div class="motorista-box">
@@ -287,13 +293,23 @@
                                 </div>
                                 <span class="badge-hora">🕒 ${v.horario_mensagem}</span>
                             </div>
+                            
+                            <div style="margin-bottom:0.8rem;">
+                                ${statusHtml}
+                            </div>
+                            
                             <div class="v-body">
                                 <a class="wpp-link" href="https://wa.me/${v.telefone}" target="_blank">
                                     <span>📱</span> ${v.telefone}
                                 </a>
                                 <span class="badge-placa">${v.placa}</span>
                             </div>
-                        </div>`).join('');
+                            
+                            <div class="msg-box">
+                                "${v.mensagem_original}"
+                            </div>
+                        </div>`;
+                    }).join('');
                         
                     grid.innerHTML += `
                         <div class="glass-card group-card">
@@ -357,6 +373,17 @@
             try {
                 const res = await fetchAPI('/api/waha/ping', {method: 'POST'});
                 alert(res.status);
+            } catch(e) { alert('Erro: ' + e.message); }
+            btn.textContent = original;
+        }
+
+        async function syncWaha(btn) {
+            const original = btn.textContent;
+            btn.textContent = "Baixando Histórico...";
+            try {
+                const res = await fetchAPI('/api/waha/sync', {method: 'POST'});
+                alert(res.status);
+                loadVeiculos();
             } catch(e) { alert('Erro: ' + e.message); }
             btn.textContent = original;
         }

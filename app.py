@@ -186,6 +186,34 @@ async def ping_waha(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro ao contatar WAHA: {str(e)}")
 
+@app.post("/api/waha/sync")
+async def sync_history_waha(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin": raise HTTPException(status_code=403)
+    conn = get_db_connection()
+    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
+    conn.close()
+    
+    if not config.get('evo_url') or not config.get('evo_instance'):
+        raise HTTPException(status_code=400, detail="Configure a WAHA primeiro.")
+    
+    try:
+        url = f"{config['evo_url'].rstrip('/')}/api/messages?session={config['evo_instance']}&limit=200"
+        h = {"accept": "application/json"}
+        if config.get('evo_apikey'): h["X-Api-Key"] = config['evo_apikey']
+        r = requests.get(url, headers=h, timeout=20)
+        if r.ok:
+            msgs = r.json()
+            # WAHA pode retornar lista direta ou paginate em "data"
+            if isinstance(msgs, dict): msgs = msgs.get("data", [])
+            for m in msgs:
+                # Simula o payload de webhook WAHA
+                processar_mensagem_webhook({"event": "message", "payload": m})
+            return {"status": f"Histórico Sincronizado! ({len(msgs)} lidas)"}
+        else:
+            raise Exception(f"HTTP {r.status_code}: {r.text}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 # --------- ROTA DO RELATÓRIO / LISTA DE CAMINHÕES ---------
 @app.get("/api/disponiveis")
 async def listar_disponiveis(dia: str = None, current_user: dict = Depends(get_current_user)):
@@ -266,8 +294,19 @@ def processar_mensagem_webhook(payload: dict):
         
     if not texto_original or not remote_jid: return
     
-    # Valida regras
-    if not regex_disp.search(texto_original): return
+    texto_lower = texto_original.lower()
+    status_veiculo = "Disponível"
+    
+    if "indisponivel" in texto_lower or "indisponível" in texto_lower:
+        status_veiculo = "Indisponível"
+    elif "disponivel" in texto_lower or "disponível" in texto_lower:
+        status_veiculo = "Disponível"
+    else:
+        # Se não tiver a palavra cravada livre de Regex, tenta a regra legada do db
+        regex_disp = re.compile(config["palavra_chave"], re.IGNORECASE)
+        if not regex_disp.search(texto_original): return
+
+    regex_placa = re.compile(config["regex_placa"])
     placa_match = regex_placa.search(texto_original)
     if not placa_match: return
     
@@ -291,11 +330,11 @@ def processar_mensagem_webhook(payload: dict):
     existente = conn.execute("SELECT id FROM veiculos WHERE data_operacao=? AND telefone=?", (data_operacao, telefone)).fetchone()
     
     if existente:
-        conn.execute("UPDATE veiculos SET placa=?, grupo=?, horario_mensagem=?, mensagem_original=? WHERE id=?", 
-                     (placa, grupo, horario_mensagem, texto_original, existente["id"]))
+        conn.execute("UPDATE veiculos SET placa=?, grupo=?, horario_mensagem=?, mensagem_original=?, status=? WHERE id=?", 
+                     (placa, grupo, horario_mensagem, texto_original, status_veiculo, existente["id"]))
     else:
-        conn.execute("INSERT INTO veiculos (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, mensagem_original) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                     (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original))
+        conn.execute("INSERT INTO veiculos (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, mensagem_original, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                     (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo))
     
     conn.commit()
     conn.close()

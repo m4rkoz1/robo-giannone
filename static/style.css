@@ -290,13 +290,22 @@ input:focus, select:focus {
 
 .groups-container {
     display: flex;
-    flex-direction: column;
-    gap: 2rem;
+    overflow-x: auto;
+    gap: 1.5rem;
+    align-items: flex-start;
+    padding-bottom: 2rem;
+    min-height: 60vh;
 }
 
 .group-card {
     padding: 1.5rem;
     background: rgba(15, 23, 42, 0.4);
+    min-width: 360px;
+    max-width: 360px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
 }
 
 .group-title {
@@ -308,9 +317,21 @@ input:focus, select:focus {
 }
 
 .group-items {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    display: flex;
+    flex-direction: column;
     gap: 1rem;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+
+/* Scrollbar Bonita pro Kanban */
+.group-items::-webkit-scrollbar, .groups-container::-webkit-scrollbar {
+    width: 6px;
+    height: 8px;
+}
+.group-items::-webkit-scrollbar-thumb, .groups-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
 }
 
 .veiculo-item {
@@ -375,6 +396,36 @@ input:focus, select:focus {
     font-size: 0.8rem;
     font-weight: 600;
     white-space: nowrap;
+}
+
+.badge-status {
+    padding: 0.25rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.badge-status.disp {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+}
+
+.badge-status.indisp {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    text-decoration: line-through;
+}
+
+.msg-box {
+    margin-top: 1rem;
+    padding: 0.8rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    font-style: italic;
+    word-break: break-word;
 }
 
 .wpp-link {
