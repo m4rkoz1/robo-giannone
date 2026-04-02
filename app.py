@@ -304,10 +304,8 @@ def enviar_reposta(jid, texto, config):
 
 def processar_mensagem_webhook(payload: dict):
     conn = get_db_connection()
-    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone())
-    
-    regex_disp = re.compile(config["palavra_chave"], re.IGNORECASE)
-    regex_placa = re.compile(config["regex_placa"])
+    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
+    conn.close()
     
     is_waha = "payload" in payload and str(payload.get("event", "")).startswith("message")
     
@@ -405,18 +403,24 @@ def processar_mensagem_webhook(payload: dict):
     data_operacao = dt_hora.strftime("%Y-%m-%d")
     horario_mensagem = dt_hora.strftime("%H:%M:%S")
     
-    # Verifica se já mandou hoje e atualiza, senão insere
-    existente = conn.execute("SELECT id FROM veiculos WHERE data_operacao=? AND telefone=?", (data_operacao, telefone)).fetchone()
-    
-    if existente:
-        conn.execute("UPDATE veiculos SET placa=?, grupo=?, horario_mensagem=?, mensagem_original=?, status=?, message_id=? WHERE id=?", 
-                     (placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id, existente["id"]))
-    else:
-        conn.execute("INSERT INTO veiculos (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, mensagem_original, status, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                     (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id))
-    
-    conn.commit()
-    conn.close()
+    # Abre nova conexão para salvar e garante fechamento
+    conn = get_db_connection()
+    try:
+        # Verifica se já mandou hoje e atualiza, senão insere
+        existente = conn.execute("SELECT id FROM veiculos WHERE data_operacao=? AND telefone=?", (data_operacao, telefone)).fetchone()
+        
+        if existente:
+            conn.execute("UPDATE veiculos SET placa=?, grupo=?, horario_mensagem=?, mensagem_original=?, status=?, message_id=? WHERE id=?", 
+                         (placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id, existente["id"]))
+        else:
+            conn.execute("INSERT INTO veiculos (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, mensagem_original, status, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id))
+        
+        conn.commit()
+    except Exception as e:
+        print("Erro SQL", e)
+    finally:
+        conn.close()
 
 # --------- ROTA CRUD ADMIN (DELETAR / EDITAR GRUPOS E VEICULOS) ---------
 @app.delete("/api/veiculos/{veiculo_id}")
