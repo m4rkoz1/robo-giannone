@@ -279,6 +279,29 @@ def obter_nome_grupo(jid, config):
         pass
     return f"Grupo ({jid.split('@')[0][-4:]})"
 
+def enviar_reposta(jid, texto, config):
+    if not config.get('evo_url') or not config.get('evo_instance'): return
+    
+    url = config['evo_url'].rstrip('/')
+    session = config['evo_instance']
+    key = config.get('evo_apikey')
+    
+    # Tenta disparar resposta para WAHA ou fallback pra Evolution
+    try:
+        req_url = f"{url}/api/sendText"
+        headers = {"accept": "application/json", "Content-Type": "application/json"}
+        if key: headers["X-Api-Key"] = key
+        payload = {"session": session, "chatId": jid, "text": texto}
+        r = requests.post(req_url, headers=headers, json=payload, timeout=5)
+        # Se 404, provável que seja url da Evolution API original
+        if r.status_code == 404:
+            req_url = f"{url}/message/sendText/{session}"
+            headers = {"apikey": key, "Content-Type": "application/json"}
+            payload = {"number": jid, "text": texto}
+            requests.post(req_url, headers=headers, json=payload, timeout=5)
+    except:
+        pass
+
 def processar_mensagem_webhook(payload: dict):
     conn = get_db_connection()
     config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone())
@@ -333,15 +356,38 @@ def processar_mensagem_webhook(payload: dict):
     elif "disponivel" in texto_lower or "disponível" in texto_lower:
         status_veiculo = "Disponível"
     else:
-        # Se não tiver a palavra cravada livre de Regex, tenta a regra legada do db
-        regex_disp = re.compile(config["palavra_chave"], re.IGNORECASE)
+        # Tenta legado
+        regex_disp = re.compile(config.get("palavra_chave", "dispon[ií]vel"), re.IGNORECASE)
         if not regex_disp.search(texto_original): return
 
-    regex_placa = re.compile(config["regex_placa"])
-    placa_match = regex_placa.search(texto_original)
-    if not placa_match: return
+    # --- Extração Inteligente de Placas ---
+    placa = ""
     
-    placa = placa_match.group(0).upper()
+    # 1. Busca padrão forte: 3 letras e 4 caracteres após, ignorando traços ou espaços e tolerando o virando 0
+    padrao_forte = re.compile(r"\b([A-Za-z]{3})[-\s]*([A-Za-z0-9]{4})\b")
+    placas = padrao_forte.findall(texto_original)
+    
+    for p_letra, p_num in placas:
+        # Troca letra 'o' minúscula ou 'O' por '0' no sufixo numérico
+        p_num_corrigido = p_num.replace('o', '0').replace('O', '0')
+        # Tem que ter pelo menos um número de verdade ali
+        if any(char.isdigit() for char in p_num_corrigido):
+            placa = (p_letra + p_num_corrigido).upper()
+            break
+            
+    if not placa:
+        # 2. Busca apenas sequências de 3 letras se não encontrou o bloco todo
+        tres_letras = re.findall(r"\b([a-zA-Z]{3})\b", texto_original)
+        blacklist = ["bom", "boa", "por", "com", "que", "pra", "uma", "dia", "não", "nao", "sim", "das", "dos", "nas", "nos", "tem", "foi", "vai", "vou", "fui", "vem", "seu"]
+        
+        tres_letras_validas = [p for p in tres_letras if p.lower() not in blacklist]
+        if tres_letras_validas:
+            placa = tres_letras_validas[0].upper()
+            
+    if not placa:
+        # 3. Retende exigir placa se a mensagem só disse "disponível"
+        enviar_reposta(remote_jid, "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso.", config)
+        return
     telefone = telefone_bruto.split("@")[0].split(":")[0]  
     
     # ------------------ PEGA O NOME REAL DO GRUPO (Evolution API / WAHA) ------------------
