@@ -236,10 +236,30 @@ async def webhook_evolution(request: Request):
         
         # Aceita Evolution (messages.upsert) e WAHA (message / message.any)
         if evento == "messages.upsert" or str(evento).startswith("message"):
-           processar_mensagem_webhook(payload)
+            if "revoke" in evento or evento == "messages.delete":
+                processar_mensagem_apagada(payload, is_waha=str(evento).startswith("message"))
+            else:
+                processar_mensagem_webhook(payload)
+                
         return {"status": "ok"}
     except Exception as e:
         return {"status": "erro", "detalhe": str(e)}
+
+def processar_mensagem_apagada(payload, is_waha):
+    conn = get_db_connection()
+    try:
+        if is_waha:
+            data = payload.get("payload", {})
+            msg_id = data.get("id") or data.get("messageId")
+            if msg_id: conn.execute("DELETE FROM veiculos WHERE message_id = ?", (msg_id,))
+        else:
+            keys = payload.get("data", {}).get("keys", [])
+            for key in keys:
+                msg_id = key.get("id")
+                if msg_id: conn.execute("DELETE FROM veiculos WHERE message_id = ?", (msg_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 def obter_nome_grupo(jid, config):
     if not config.get('evo_url') or not config.get('evo_instance'):
@@ -278,12 +298,22 @@ def processar_mensagem_webhook(payload: dict):
         telefone_bruto = data.get("author") or data.get("participant") or remote_jid
         _meta = data.get("_data", {})
         motorista = _meta.get("notifyName") or data.get("pushName") or "Desconhecido"
+        message_id = data.get("id", "")
     else:
         data = payload.get("data", {})
         remote_jid = data.get("key", {}).get("remoteJid", "")
         if data.get("key", {}).get("fromMe", False): return
         
         message_content = data.get("message", {})
+        
+        # Checa se Evolution mandou revogação encrustada (ProtocolMessage)
+        if "protocolMessage" in message_content and message_content["protocolMessage"].get("type") == "REVOKE":
+            msg_id = message_content["protocolMessage"].get("key", {}).get("id")
+            if msg_id:
+                conn.execute("DELETE FROM veiculos WHERE message_id = ?", (msg_id,))
+                conn.commit()
+            return
+            
         texto_original = message_content.get("conversation", message_content.get("extendedTextMessage", {}).get("text", ""))
         
         telefone_bruto = data.get("participant") or data.get("key", {}).get("participant", "") or remote_jid
@@ -291,6 +321,7 @@ def processar_mensagem_webhook(payload: dict):
             telefone_bruto = data["sender"]
         timestamp_msg = data.get("messageTimestamp")
         motorista = data.get("pushName", "Desconhecido")
+        message_id = data.get("key", {}).get("id", "")
         
     if not texto_original or not remote_jid: return
     
@@ -330,14 +361,46 @@ def processar_mensagem_webhook(payload: dict):
     existente = conn.execute("SELECT id FROM veiculos WHERE data_operacao=? AND telefone=?", (data_operacao, telefone)).fetchone()
     
     if existente:
-        conn.execute("UPDATE veiculos SET placa=?, grupo=?, horario_mensagem=?, mensagem_original=?, status=? WHERE id=?", 
-                     (placa, grupo, horario_mensagem, texto_original, status_veiculo, existente["id"]))
+        conn.execute("UPDATE veiculos SET placa=?, grupo=?, horario_mensagem=?, mensagem_original=?, status=?, message_id=? WHERE id=?", 
+                     (placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id, existente["id"]))
     else:
-        conn.execute("INSERT INTO veiculos (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, mensagem_original, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                     (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo))
+        conn.execute("INSERT INTO veiculos (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, mensagem_original, status, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id))
     
     conn.commit()
     conn.close()
+
+# --------- ROTA CRUD ADMIN (DELETAR / EDITAR GRUPOS E VEICULOS) ---------
+@app.delete("/api/veiculos/{veiculo_id}")
+async def deletar_veiculo(veiculo_id: int, current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin": raise HTTPException(status_code=403)
+    conn = get_db_connection()
+    conn.execute("DELETE FROM veiculos WHERE id = ?", (veiculo_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.delete("/api/grupos/{nome_grupo}")
+async def deletar_grupo(nome_grupo: str, dia: str = None, current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin": raise HTTPException(status_code=403)
+    if not dia: dia = date.today().strftime("%Y-%m-%d")
+    conn = get_db_connection()
+    conn.execute("DELETE FROM veiculos WHERE grupo = ? AND data_operacao = ?", (nome_grupo, dia))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.put("/api/grupos/{nome_grupo}")
+async def renomear_grupo(nome_grupo: str, request: Request, current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin": raise HTTPException(status_code=403)
+    dados = await request.json()
+    novo_nome = dados.get("novo_nome")
+    if not novo_nome: raise HTTPException(status_code=400)
+    conn = get_db_connection()
+    conn.execute("UPDATE veiculos SET grupo = ? WHERE grupo = ?", (novo_nome, nome_grupo))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn

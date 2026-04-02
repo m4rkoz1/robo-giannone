@@ -77,6 +77,11 @@ def init_db():
         cursor.execute("ALTER TABLE veiculos ADD COLUMN status TEXT DEFAULT 'Disponível'")
     except sqlite3.OperationalError: pass
 
+    # Migração da coluna message_id na tabela veiculos
+    try:
+        cursor.execute("ALTER TABLE veiculos ADD COLUMN message_id TEXT DEFAULT ''")
+    except sqlite3.OperationalError: pass
+
     conn.commit()
     conn.close()
 

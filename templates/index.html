@@ -312,6 +312,10 @@
                             ? `<span class="badge-status indisp">🔴 Indisponível</span>`
                             : `<span class="badge-status disp">🟢 Disponível</span>`;
                             
+                        let adminVeiculoControls = role === 'admin' 
+                            ? `<button onclick="delVeiculo(${v.id})" title="Excluir Placa" style="background:transparent; color:#ef4444; border:none; padding:4px; font-size:1rem; cursor:pointer">✖️</button>`
+                            : '';
+                            
                         return `
                         <div class="veiculo-item">
                             <div class="v-header">
@@ -319,7 +323,10 @@
                                     <span class="motorista-icone">👤</span>
                                     <strong class="motorista-nome" title="${v.motorista}">${v.motorista}</strong>
                                 </div>
-                                <span class="badge-hora">🕒 ${v.horario_mensagem}</span>
+                                <div style="display:flex; align-items:center; gap:0.5rem">
+                                    <span class="badge-hora">🕒 ${v.horario_mensagem}</span>
+                                    ${adminVeiculoControls}
+                                </div>
                             </div>
                             
                             <div style="margin-bottom:0.8rem;">
@@ -339,9 +346,19 @@
                         </div>`;
                     }).join('');
                         
+                    let adminGrupoControls = role === 'admin'
+                        ? `<div style="display:flex; gap:0.3rem">
+                             <button onclick="renomearGrupo('${nomeGrupo}')" title="Editar Nome" style="background:transparent; border:none; cursor:pointer; font-size:1.1rem">✏️</button>
+                             <button onclick="delGrupo('${nomeGrupo}')" title="Apagar Grupo" style="background:transparent; border:none; cursor:pointer; font-size:1.1rem">🗑️</button>
+                           </div>`
+                        : '';
+                        
                     grid.innerHTML += `
                         <div class="glass-card group-card">
-                            <h3 class="group-title">${nomeGrupo}</h3>
+                            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem; padding-bottom:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05)">
+                                <h3 class="group-title" style="margin:0; border:none; padding:0">${nomeGrupo}</h3>
+                                ${adminGrupoControls}
+                            </div>
                             <div class="group-items">${itemsHtml}</div>
                         </div>
                     `;
@@ -454,6 +471,36 @@
                 await fetchAPI(`/api/users/${id}`, { method: 'DELETE' });
                 loadUsers();
             } catch(e) { alert('Erro ao deletar'); }
+        }
+
+        async function delVeiculo(id) {
+            if(!confirm('Tem certeza que deseja apagar essa placa do relatório de hoje?')) return;
+            try {
+                await fetchAPI(`/api/veiculos/${id}`, { method: 'DELETE' });
+                loadVeiculos();
+            } catch(e) { alert('Erro ao deletar veículo. ' + e.message); }
+        }
+
+        async function delGrupo(nome) {
+            const date = document.getElementById('filter-date').value;
+            if(!confirm(`Apagar o grupo ${nome} e TODOS os veículos dele neste dia?`)) return;
+            try {
+                await fetchAPI(`/api/grupos/${encodeURIComponent(nome)}?dia=${date}`, { method: 'DELETE' });
+                loadVeiculos();
+            } catch(e) { alert('Erro ao deletar. ' + e.message); }
+        }
+
+        async function renomearGrupo(nomeAtual) {
+            const novo = prompt('Qual é o novo nome para este grupo?', nomeAtual);
+            if(!novo || novo === nomeAtual) return;
+            try {
+                await fetchAPI(`/api/grupos/${encodeURIComponent(nomeAtual)}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ novo_nome: novo })
+                });
+                loadVeiculos();
+            } catch(e) { alert('Erro ao renomear. ' + e.message); }
         }
     </script>
 </body>
