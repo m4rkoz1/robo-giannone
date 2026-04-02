@@ -158,6 +158,34 @@ async def delete_user(user_id: int, current_user: dict = Depends(get_current_use
     conn.close()
     return {"status": "ok"}
 
+@app.get("/api/webhook/status")
+async def get_webhook_status(current_user: dict = Depends(get_current_user)):
+    return {"last_hook": LAST_WEBHOOK_TIME}
+
+@app.post("/api/waha/ping")
+async def ping_waha(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin": raise HTTPException(status_code=403)
+    conn = get_db_connection()
+    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
+    conn.close()
+    
+    if not config.get('evo_url') or not config.get('evo_instance'):
+        raise HTTPException(status_code=400, detail="Configure a WAHA e salve primeiro.")
+    
+    try:
+        url = f"{config['evo_url'].rstrip('/')}/api/sessions/{config['evo_instance']}"
+        h = {"accept": "application/json"}
+        if config.get('evo_apikey'):
+            h["X-Api-Key"] = config['evo_apikey']
+        r = requests.get(url, headers=h, timeout=5)
+        if r.ok:
+            info = r.json()
+            return {"status": f"WAHA Conectado! (Status do Celular: {info.get('status', 'OK')})"}
+        else:
+            raise Exception(f"WAHA retornou erro HTTP {r.status_code}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao contatar WAHA: {str(e)}")
+
 # --------- ROTA DO RELATÓRIO / LISTA DE CAMINHÕES ---------
 @app.get("/api/disponiveis")
 async def listar_disponiveis(dia: str = None, current_user: dict = Depends(get_current_user)):
@@ -167,12 +195,17 @@ async def listar_disponiveis(dia: str = None, current_user: dict = Depends(get_c
     conn.close()
     return [dict(v) for v in veiculos]
 
-# --------- ROTA DE WEBHOOK (EVOLUTION API) ---------
+LAST_WEBHOOK_TIME = "Nenhum evento detectado desde o último reinício."
+
+# --------- ROTA DE WEBHOOK (EVOLUTION API / WAHA API) ---------
 @app.post("/webhook/evolution")
 async def webhook_evolution(request: Request):
+    global LAST_WEBHOOK_TIME
     try:
         payload = await request.json()
-        evento = payload.get("event", "")
+        evento = payload.get("event", "desconhecido")
+        LAST_WEBHOOK_TIME = f"Recebido hoje às {datetime.now(timezone(timedelta(hours=-3))).strftime('%H:%M:%S')} (Tipo: {evento})"
+        
         # Aceita Evolution (messages.upsert) e WAHA (message / message.any)
         if evento == "messages.upsert" or str(evento).startswith("message"):
            processar_mensagem_webhook(payload)
