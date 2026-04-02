@@ -60,11 +60,16 @@
                 <div class="scroll-area">
                     <!-- Tab Lista -->
                     <section id="tab-lista" class="tab-content active">
-                        <div class="filters glass-card">
+                        <div class="filters glass-card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                             <div class="input-group row-align">
                                 <label>Selecionar Data:</label>
                                 <input type="date" id="filter-date" onchange="loadVeiculos()">
                                 <button onclick="loadVeiculos()" class="btn secondary">Atualizar Grelha</button>
+                            </div>
+                            <div class="view-controls row-align">
+                                <button onclick="changeZoom(-0.1)" class="btn secondary small" style="padding: 0.5rem 1rem;" title="Diminuir Fonte">A-</button>
+                                <button onclick="changeZoom(0.1)" class="btn secondary small" style="padding: 0.5rem 1rem;" title="Aumentar Fonte">A+</button>
+                                <button onclick="toggleCompactMode()" class="btn outline small" style="padding: 0.5rem 1rem; margin-left: 0.5rem;" id="btn-compact">Modo: Tela Completa</button>
                             </div>
                         </div>
 
@@ -228,6 +233,29 @@
         function logout() {
             localStorage.clear();
             location.reload();
+        }
+
+        // Funções de Zoom e Compacto
+        let currentZoom = 1.0;
+        function changeZoom(factor) {
+            currentZoom += factor;
+            if(currentZoom < 0.6) currentZoom = 0.6;
+            if(currentZoom > 1.8) currentZoom = 1.8;
+            document.getElementById('veiculos-grid').style.zoom = currentZoom;
+        }
+
+        let compactMode = false;
+        function toggleCompactMode() {
+            compactMode = !compactMode;
+            const grid = document.getElementById('veiculos-grid');
+            const btn = document.getElementById('btn-compact');
+            if (compactMode) {
+                grid.classList.add('compact-view');
+                btn.textContent = 'Modo: Somente Placas';
+            } else {
+                grid.classList.remove('compact-view');
+                btn.textContent = 'Modo: Tela Completa';
+            }
         }
 
         function switchTab(tabId) {
