@@ -98,6 +98,17 @@
                                         <textarea id="config-msg-erro" rows="3" placeholder="⚠️ Ops, faltou uma informação!"></textarea>
                                     </div>
 
+                                    <h3 class="mt-5 border-t pt-4">Inteligência Artificial (OpenRouter)</h3>
+                                    <p class="subtitle mb-4">Adicione uma IA para extrair as placas de textos confusos automaticamente.</p>
+                                    <div class="input-group">
+                                        <label>API Key do OpenRouter (Deixe em branco para usar Regex Clássico)</label>
+                                        <input type="password" id="llm-api-key" placeholder="sk-or-v1-...">
+                                    </div>
+                                    <div class="input-group mt-3">
+                                        <label>Modelo LLM</label>
+                                        <input type="text" id="llm-model" placeholder="ex: google/gemini-2.5-flash-lite-preview">
+                                    </div>
+
                                     <h3 class="mt-5 border-t pt-4">Configuração WAHA API</h3>
                                     <p class="subtitle mb-4">Necessário para capturar os Nomes Reais dos Grupos.</p>
                                     <div class="input-group">
@@ -376,6 +387,8 @@
             document.getElementById('config-palavra').value = config.palavra_chave || '';
             document.getElementById('config-regex').value = config.regex_placa || '';
             document.getElementById('config-msg-erro').value = config.msg_erro_placa || '';
+            document.getElementById('llm-api-key').value = config.llm_api_key || '';
+            document.getElementById('llm-model').value = config.llm_model || 'google/gemini-2.5-flash-lite-preview';
             document.getElementById('evo-url').value = config.evo_url || '';
             document.getElementById('evo-instance').value = config.evo_instance || '';
             document.getElementById('evo-apikey').value = config.evo_apikey || '';
@@ -386,6 +399,8 @@
             const palavra = document.getElementById('config-palavra').value;
             const regex = document.getElementById('config-regex').value;
             const msg_erro = document.getElementById('config-msg-erro').value;
+            const llmKey = document.getElementById('llm-api-key').value;
+            const llmModel = document.getElementById('llm-model').value;
             const evoUrl = document.getElementById('evo-url').value;
             const evoInst = document.getElementById('evo-instance').value;
             const evoKey = document.getElementById('evo-apikey').value;
@@ -398,6 +413,8 @@
                         palavra_chave: palavra, 
                         regex_placa: regex,
                         msg_erro_placa: msg_erro,
+                        llm_api_key: llmKey,
+                        llm_model: llmModel,
                         evo_url: evoUrl,
                         evo_instance: evoInst,
                         evo_apikey: evoKey

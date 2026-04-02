@@ -84,8 +84,8 @@ async def update_config(config_data: ConfigUpdate, current_user: dict = Depends(
     
     conn = get_db_connection()
     conn.execute(
-        "UPDATE config SET palavra_chave = ?, regex_placa = ?, evo_url = ?, evo_instance = ?, evo_apikey = ?, msg_erro_placa = ?", 
-        (config_data.palavra_chave, config_data.regex_placa, config_data.evo_url, config_data.evo_instance, config_data.evo_apikey, config_data.msg_erro_placa)
+        "UPDATE config SET palavra_chave = ?, regex_placa = ?, evo_url = ?, evo_instance = ?, evo_apikey = ?, msg_erro_placa = ?, llm_api_key = ?, llm_model = ?", 
+        (config_data.palavra_chave, config_data.regex_placa, config_data.evo_url, config_data.evo_instance, config_data.evo_apikey, config_data.msg_erro_placa, config_data.llm_api_key, config_data.llm_model)
     )
     conn.commit()
     conn.close()
@@ -307,6 +307,47 @@ def enviar_reposta(jid, texto, config):
     except:
         pass
 
+import json
+def analisar_mensagem_com_ia(texto, config):
+    api_key = config.get("llm_api_key")
+    if not api_key: return None, None
+    model = config.get("llm_model") or "google/gemini-2.5-flash-lite-preview"
+    
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    prompt = f"""Você extrai dados de mensagens de motoristas de caminhão.
+O motorista irá informar sobre o veículo, placa ou seu status ("disponível" ou "indisponível").
+Responda APENAS com um objeto JSON válido (sem markdown de formatação) com as chaves:
+"status": "Disponível" OU "Indisponível" (caso a mensagem não seja sobre disponibilidade, coloque null).
+"placa": a placa com 7 digitos limpos, ex: "ABC1234" ou "PZH0000". Caso a pessoa mande só 3 letras isoladas parecendo ser a placa (ex: "estou disp PZH"), coloque as 3 letras na placa. Se não houver placa, retorne null.
+
+Mensagem do Motorista: "{texto}"
+JSON:"""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"}
+    }
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=12)
+        if r.ok:
+            data = r.json()
+            # Limpa qualquer bloco markdown que gemini coloque qnd response_format type=json não é tão obedecido
+            txt = data["choices"][0]["message"]["content"].strip()
+            if txt.startswith("```json"): txt = txt[7:-3].strip()
+            if txt.startswith("```"): txt = txt[3:-3].strip()
+            js = json.loads(txt)
+            st = js.get("status")
+            pl = js.get("placa")
+            if isinstance(pl, str): pl = pl.strip().upper().replace(" ", "").replace("-", "")
+            return st, pl
+    except Exception as e:
+        print("Erro na IA:", e)
+    return None, None
+
 def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
     conn = get_db_connection()
     config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
@@ -351,41 +392,42 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         
     if not texto_original or not remote_jid: return
     
-    texto_lower = texto_original.lower()
-    status_veiculo = "Disponível"
+    # Se o admin ativou a IA (llm_api_key presente), a IA toma o controle da extração
     
-    if "indisponivel" in texto_lower or "indisponível" in texto_lower:
-        status_veiculo = "Indisponível"
-    elif "disponivel" in texto_lower or "disponível" in texto_lower:
-        status_veiculo = "Disponível"
+    status_ia, placa_ia = analisar_mensagem_com_ia(texto_original, config)
+    if config.get("llm_api_key"):
+        # Usa totalmente a IA se estiver configurada.
+        if not status_ia: return # IA disse que não é mensagem de status
+        status_veiculo = status_ia
+        placa = placa_ia or ""
     else:
-        # Tenta legado
-        regex_disp = re.compile(config.get("palavra_chave", "dispon[ií]vel"), re.IGNORECASE)
-        if not regex_disp.search(texto_original): return
+        # ---- HEURÍSTICA LEGADA (SEM IA) ----
+        texto_lower = texto_original.lower()
+        if "indisponivel" in texto_lower or "indisponível" in texto_lower:
+            status_veiculo = "Indisponível"
+        elif "disponivel" in texto_lower or "disponível" in texto_lower:
+            status_veiculo = "Disponível"
+        else:
+            regex_disp = re.compile(config.get("palavra_chave", "dispon[ií]vel"), re.IGNORECASE)
+            if not regex_disp.search(texto_original): return
 
-    # --- Extração Inteligente de Placas ---
-    placa = ""
-    
-    # 1. Busca padrão forte: 3 letras e 4 caracteres após, ignorando traços ou espaços e tolerando o virando 0
-    padrao_forte = re.compile(r"\b([A-Za-z]{3})[-\s]*([A-Za-z0-9]{4})\b")
-    placas = padrao_forte.findall(texto_original)
-    
-    for p_letra, p_num in placas:
-        # Troca letra 'o' minúscula ou 'O' por '0' no sufixo numérico
-        p_num_corrigido = p_num.replace('o', '0').replace('O', '0')
-        # Tem que ter pelo menos um número de verdade ali
-        if any(char.isdigit() for char in p_num_corrigido):
-            placa = (p_letra + p_num_corrigido).upper()
-            break
-            
-    if not placa:
-        # 2. Busca apenas sequências de 3 letras se não encontrou o bloco todo
-        tres_letras = re.findall(r"\b([a-zA-Z]{3})\b", texto_original)
-        blacklist = ["bom", "boa", "por", "com", "que", "pra", "uma", "dia", "não", "nao", "sim", "das", "dos", "nas", "nos", "tem", "foi", "vai", "vou", "fui", "vem", "seu"]
+        # 1. Busca padrão forte: 3 letras e 4 caracteres após, ignorando traços ou espaços e tolerando o virando 0
+        padrao_forte = re.compile(r"\b([A-Za-z]{3})[-\s]*([A-Za-z0-9]{4})\b")
+        placas = padrao_forte.findall(texto_original)
         
-        tres_letras_validas = [p for p in tres_letras if p.lower() not in blacklist]
-        if tres_letras_validas:
-            placa = tres_letras_validas[0].upper()
+        for p_letra, p_num in placas:
+            p_num_corrigido = p_num.replace('o', '0').replace('O', '0')
+            if any(char.isdigit() for char in p_num_corrigido):
+                placa = (p_letra + p_num_corrigido).upper()
+                break
+                
+        if not placa:
+            tres_letras = re.findall(r"\b([a-zA-Z]{3})\b", texto_original)
+            blacklist = ["bom", "boa", "por", "com", "que", "pra", "uma", "dia", "não", "nao", "sim", "das", "dos", "nas", "nos", "tem", "foi", "vai", "vou", "fui", "vem", "seu"]
+            tres_letras_validas = [p for p in tres_letras if p.lower() not in blacklist]
+            if tres_letras_validas:
+                placa = tres_letras_validas[0].upper()
+    # ----------------------------------------
             
     if not placa:
         # 3. Responde exigindo a placa se o admin escreveu uma mensagem pra isso. Do contrário, usa default

@@ -82,6 +82,14 @@ def init_db():
         cursor.execute("ALTER TABLE veiculos ADD COLUMN message_id TEXT DEFAULT ''")
     except sqlite3.OperationalError: pass
 
+    # Migração LLM (IA OpenRouter)
+    try:
+        cursor.execute("ALTER TABLE config ADD COLUMN llm_api_key TEXT DEFAULT ''")
+    except sqlite3.OperationalError: pass
+    try:
+        cursor.execute("ALTER TABLE config ADD COLUMN llm_model TEXT DEFAULT 'google/gemini-2.5-flash-lite-preview'")
+    except sqlite3.OperationalError: pass
+
     conn.commit()
     conn.close()
 
