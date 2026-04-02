@@ -92,7 +92,10 @@ def init_db():
         cursor.execute("ALTER TABLE config ADD COLUMN llm_api_key TEXT DEFAULT ''")
     except sqlite3.OperationalError: pass
     try:
-        cursor.execute("ALTER TABLE config ADD COLUMN llm_model TEXT DEFAULT 'google/gemini-2.5-flash-lite-preview'")
+        cursor.execute("ALTER TABLE config ADD COLUMN llm_model TEXT DEFAULT 'meta/llama-3.3-70b-instruct'")
+    except sqlite3.OperationalError: pass
+    try:
+        cursor.execute("ALTER TABLE config ADD COLUMN llm_base_url TEXT DEFAULT 'https://integrate.api.nvidia.com/v1'")
     except sqlite3.OperationalError: pass
 
     conn.commit()

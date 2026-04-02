@@ -157,15 +157,28 @@
                                     <span class="config-icon">🧠</span>
                                     <h3>Inteligência Artificial</h3>
                                 </div>
-                                <p class="config-desc">Conecte uma LLM via OpenRouter para extrair placas com IA.</p>
+                                <p class="config-desc">Conecte uma LLM para extrair placas com IA. Suporta NVIDIA, OpenRouter, Groq e qualquer API compatível com OpenAI.</p>
                                 <form id="llm-form" class="config-form-inner">
                                     <div class="input-group">
-                                        <label>API Key (OpenRouter)</label>
-                                        <input type="password" id="llm-api-key" placeholder="sk-or-v1-...">
+                                        <label>Provedor</label>
+                                        <select id="llm-provider" onchange="onProviderChange()">
+                                            <option value="nvidia">🟢 NVIDIA NIM (Gratuito)</option>
+                                            <option value="openrouter">OpenRouter</option>
+                                            <option value="groq">Groq</option>
+                                            <option value="custom">Personalizado</option>
+                                        </select>
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>URL Base da API</label>
+                                        <input type="text" id="llm-base-url" placeholder="https://integrate.api.nvidia.com/v1">
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>API Key</label>
+                                        <input type="password" id="llm-api-key" placeholder="nvapi-...">
                                     </div>
                                     <div class="input-group mt-2">
                                         <label>Modelo LLM</label>
-                                        <input type="text" id="llm-model" placeholder="google/gemini-2.5-flash-lite-preview">
+                                        <input type="text" id="llm-model" placeholder="meta/llama-3.3-70b-instruct">
                                     </div>
                                     <div class="config-actions mt-2">
                                         <button type="button" onclick="testLLM(this)" class="btn outline small">🧪 Testar IA</button>
@@ -485,6 +498,29 @@
         }
 
         // ===================== CONFIGURAÇÕES =====================
+        const PROVIDERS = {
+            nvidia:     { url: 'https://integrate.api.nvidia.com/v1', model: 'meta/llama-3.3-70b-instruct', placeholder: 'nvapi-...' },
+            openrouter: { url: 'https://openrouter.ai/api/v1',       model: 'google/gemini-2.5-flash-lite-preview', placeholder: 'sk-or-v1-...' },
+            groq:       { url: 'https://api.groq.com/openai/v1',     model: 'llama-3.3-70b-versatile', placeholder: 'gsk_...' },
+            custom:     { url: '',                                     model: '', placeholder: 'sua-chave-aqui' }
+        };
+
+        function onProviderChange() {
+            const provider = document.getElementById('llm-provider').value;
+            const p = PROVIDERS[provider];
+            document.getElementById('llm-base-url').value = p.url;
+            document.getElementById('llm-model').value = p.model;
+            document.getElementById('llm-api-key').placeholder = p.placeholder;
+        }
+
+        function detectProvider(url) {
+            if(!url) return 'nvidia';
+            if(url.includes('nvidia')) return 'nvidia';
+            if(url.includes('openrouter')) return 'openrouter';
+            if(url.includes('groq')) return 'groq';
+            return 'custom';
+        }
+
         async function loadConfig() {
             if(role !== 'admin') return;
             try {
@@ -493,7 +529,9 @@
                 document.getElementById('config-regex').value = config.regex_placa || '';
                 document.getElementById('config-msg-erro').value = config.msg_erro_placa || '';
                 document.getElementById('llm-api-key').value = config.llm_api_key || '';
-                document.getElementById('llm-model').value = config.llm_model || 'google/gemini-2.5-flash-lite-preview';
+                document.getElementById('llm-model').value = config.llm_model || 'meta/llama-3.3-70b-instruct';
+                document.getElementById('llm-base-url').value = config.llm_base_url || 'https://integrate.api.nvidia.com/v1';
+                document.getElementById('llm-provider').value = detectProvider(config.llm_base_url);
                 document.getElementById('evo-url').value = config.evo_url || '';
                 document.getElementById('evo-instance').value = config.evo_instance || '';
                 document.getElementById('evo-apikey').value = config.evo_apikey || '';
@@ -516,6 +554,7 @@
                         msg_erro_placa: document.getElementById('config-msg-erro').value,
                         llm_api_key: document.getElementById('llm-api-key').value,
                         llm_model: document.getElementById('llm-model').value,
+                        llm_base_url: document.getElementById('llm-base-url').value,
                         evo_url: document.getElementById('evo-url').value,
                         evo_instance: document.getElementById('evo-instance').value,
                         evo_apikey: document.getElementById('evo-apikey').value

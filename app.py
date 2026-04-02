@@ -84,8 +84,8 @@ async def update_config(config_data: ConfigUpdate, current_user: dict = Depends(
     
     conn = get_db_connection()
     conn.execute(
-        "UPDATE config SET palavra_chave = ?, regex_placa = ?, evo_url = ?, evo_instance = ?, evo_apikey = ?, msg_erro_placa = ?, llm_api_key = ?, llm_model = ?", 
-        (config_data.palavra_chave, config_data.regex_placa, config_data.evo_url, config_data.evo_instance, config_data.evo_apikey, config_data.msg_erro_placa, config_data.llm_api_key, config_data.llm_model)
+        "UPDATE config SET palavra_chave = ?, regex_placa = ?, evo_url = ?, evo_instance = ?, evo_apikey = ?, msg_erro_placa = ?, llm_api_key = ?, llm_model = ?, llm_base_url = ?", 
+        (config_data.palavra_chave, config_data.regex_placa, config_data.evo_url, config_data.evo_instance, config_data.evo_apikey, config_data.msg_erro_placa, config_data.llm_api_key, config_data.llm_model, config_data.llm_base_url)
     )
     conn.commit()
     conn.close()
@@ -308,12 +308,17 @@ def enviar_reposta(jid, texto, config):
         pass
 
 import json
+def get_llm_url(config):
+    base = config.get("llm_base_url", "").rstrip("/")
+    if not base: base = "https://integrate.api.nvidia.com/v1"
+    return f"{base}/chat/completions"
+
 def analisar_mensagem_com_ia(texto, config):
     api_key = config.get("llm_api_key")
     if not api_key: return None, None
-    model = config.get("llm_model") or "google/gemini-2.5-flash-lite-preview"
+    model = config.get("llm_model") or "meta/llama-3.3-70b-instruct"
     
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = get_llm_url(config)
     prompt = f"""Você extrai dados de mensagens de motoristas de caminhão.
 O motorista irá informar sobre o veículo, placa ou seu status ("disponível" ou "indisponível").
 Responda APENAS com um objeto JSON válido (sem markdown de formatação) com as chaves:
@@ -328,14 +333,12 @@ JSON:"""
     }
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"}
+        "messages": [{"role": "user", "content": prompt}]
     }
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=12)
         if r.ok:
             data = r.json()
-            # Limpa qualquer bloco markdown que gemini coloque qnd response_format type=json não é tão obedecido
             txt = data["choices"][0]["message"]["content"].strip()
             if txt.startswith("```json"): txt = txt[7:-3].strip()
             if txt.startswith("```"): txt = txt[3:-3].strip()
@@ -514,10 +517,10 @@ async def test_llm(current_user: dict = Depends(get_current_user)):
     if not api_key:
         return {"status": "not_configured"}
     
-    model = config.get("llm_model") or "google/gemini-2.5-flash-lite-preview"
+    model = config.get("llm_model") or "meta/llama-3.3-70b-instruct"
     
     try:
-        url = "https://openrouter.ai/api/v1/chat/completions"
+        url = get_llm_url(config)
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": model,
@@ -528,6 +531,7 @@ async def test_llm(current_user: dict = Depends(get_current_user)):
         if r.ok:
             data = r.json()
             txt = data["choices"][0]["message"]["content"].strip()
+            base_url = config.get('llm_base_url', 'NVIDIA NIM')
             return {"status": "ok", "model": model, "test_response": txt}
         else:
             return {"status": "error", "detail": f"HTTP {r.status_code}: {r.text[:200]}"}
@@ -548,7 +552,7 @@ async def chat_ia(req: ChatRequest, current_user: dict = Depends(get_current_use
         conn.close()
         raise HTTPException(status_code=400, detail="IA não configurada. Adicione a API Key do OpenRouter nas Configurações.")
     
-    model = config.get("llm_model") or "google/gemini-2.5-flash-lite-preview"
+    model = config.get("llm_model") or "meta/llama-3.3-70b-instruct"
     
     # Montar contexto com dados reais do sistema
     hoje = date.today().strftime("%Y-%m-%d")
@@ -594,7 +598,7 @@ Sua função é responder perguntas sobre o sistema de monitoramento de veículo
 """
     
     try:
-        url = "https://openrouter.ai/api/v1/chat/completions"
+        url = get_llm_url(config)
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": model,

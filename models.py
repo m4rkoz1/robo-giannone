@@ -14,3 +14,4 @@ class ConfigUpdate(BaseModel):
     msg_erro_placa: Optional[str] = ""
     llm_api_key: Optional[str] = ""
     llm_model: Optional[str] = ""
+    llm_base_url: Optional[str] = ""
