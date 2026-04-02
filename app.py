@@ -178,6 +178,22 @@ async def webhook_evolution(request: Request):
     except Exception as e:
         return {"status": "erro", "detalhe": str(e)}
 
+def obter_nome_grupo(jid, config):
+    if not config.get('evo_url') or not config.get('evo_apikey') or not config.get('evo_instance'):
+        return f"Grupo ({jid.split('@')[0][-4:]})"
+    try:
+        # A API Evolution V1 e V2 usa essa rota para extrair os Info do Grupo (aonde tem o título)
+        url = f"{config['evo_url'].rstrip('/')}/group/findGroupInfos/{config['evo_instance']}?groupJid={jid}"
+        headers = {"apikey": config['evo_apikey']}
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.ok:
+            data = resp.json()
+            # Pode retornar em formatação antiga ou nova
+            return data.get('subject') or data.get('name') or f"Grupo ({jid.split('@')[0][-4:]})"
+    except:
+        pass
+    return f"Grupo ({jid.split('@')[0][-4:]})"
+
 def processar_mensagem_webhook(payload: dict):
     conn = get_db_connection()
     config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone())
@@ -199,14 +215,19 @@ def processar_mensagem_webhook(payload: dict):
     if not placa_match: return
     
     placa = placa_match.group(0).upper()
-    telefone = data.get("key", {}).get("participant", "") or remote_jid
-    telefone = telefone.split("@")[0].split(":")[0]  # Remove :xx de instâncias multi-device e tira o @s.whatsapp
+    telefone = data.get("participant") or data.get("key", {}).get("participant", "") or remote_jid
+    # Remove as marcações de JID ocultos, de dispositivos multiplos e etc
+    telefone = telefone.split("@")[0].split(":")[0]  
+    
+    # Tentativa de pegar o número real caso seja um grupo de comunidade (que mascara a ID)
+    if "sender" in data:
+        telefone = data["sender"].split("@")[0].split(":")[0]
     
     motorista = data.get("pushName", "Desconhecido")
     
+    # ------------------ PEGA O NOME REAL DO GRUPO (Evolution API) ------------------
     if "@g.us" in remote_jid:
-        base_id = remote_jid.split("@")[0]
-        grupo = f"Grupo ({base_id[-4:]})" # Como o Webhook não manda o nome do grupo, usamos os ultimos 4 digitos
+        grupo = obter_nome_grupo(remote_jid, config)
     else:
         grupo = "Chat Privado"
     
