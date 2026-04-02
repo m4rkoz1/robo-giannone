@@ -74,43 +74,39 @@
                     </section>
 
                     <!-- Tab Configs (Admin) -->
-                    <section id="tab-configs" class="tab-content hidden glass-card mt-4">
-                        <div class="split-view">
-                            <div class="form-area">
-                                <h3>Regras do Webhook</h3>
-                                <p class="subtitle">Aceita formatação Regex.</p>
-                                <form id="config-form" class="mt-4">
-                                    <div class="input-group">
-                                        <label>Palavra-Chave</label>
-                                        <input type="text" id="config-palavra">
-                                    </div>
-                                    <div class="input-group mt-2">
-                                        <label>Padrão de Placa</label>
-                                        <input type="text" id="config-regex">
-                                    </div>
+                    <section id="tab-configs" class="tab-content hidden glass-card mt-4 p-4">
+                        <div class="form-area" style="max-width: 600px;">
+                            <h3>Regras de Filtro das Mensagens</h3>
+                            <p class="subtitle mt-1 mb-4">Aceita formatação avançada (Regex).</p>
+                            <form id="config-form" class="mt-2">
+                                <div class="input-group">
+                                    <label>Palavra-Chave</label>
+                                    <input type="text" id="config-palavra" placeholder="Ex: disponivel">
+                                </div>
+                                <div class="input-group mt-3">
+                                    <label>Padrão de Placa</label>
+                                    <input type="text" id="config-regex" placeholder="Padrão das Placas">
+                                </div>
 
-                                    <h3 class="mt-4">Configuração Evolution API</h3>
-                                    <div class="input-group mt-2">
-                                        <label>URL Base da Evolution</label>
-                                        <input type="text" id="evo-url" placeholder="http://api.site.com">
-                                    </div>
-                                    <div class="input-group mt-2">
-                                        <label>Nome da Instância</label>
-                                        <input type="text" id="evo-instance">
-                                    </div>
-                                    <div class="input-group mt-2">
-                                        <label>Global API Key</label>
-                                        <input type="password" id="evo-apikey">
-                                    </div>
-                                    <button type="submit" class="btn primary mt-4">Salvar Configurações</button>
-                                    <span id="config-msg" class="success-msg ml-2"></span>
-                                </form>
-                            </div>
-                            <div class="list-area pl-4">
-                                <h3>Sincronizar Webhook</h3>
-                                <p class="helper">Avisar a Evolution para mandar mensagens para nós.</p>
-                                <button onclick="syncEvo()" class="btn secondary mt-4">Sincronizar Automaticamente</button>
-                            </div>
+                                <h3 class="mt-5 border-t pt-4">Configuração WAHA API</h3>
+                                <p class="subtitle mb-4">Necessário para capturar os Nomes Reais dos Grupos.</p>
+                                <div class="input-group">
+                                    <label>URL Base da WAHA</label>
+                                    <input type="text" id="evo-url" placeholder="Ex: https://waha.meudominio.com">
+                                </div>
+                                <div class="input-group mt-3">
+                                    <label>Nome da Sessão (Session)</label>
+                                    <input type="text" id="evo-instance" placeholder="Ex: default">
+                                </div>
+                                <div class="input-group mt-3">
+                                    <label>Chave API (Waha Plus - Opcional)</label>
+                                    <input type="password" id="evo-apikey" placeholder="Somente se configurado">
+                                </div>
+                                <div class="mt-4 flex align-center">
+                                    <button type="submit" class="btn primary">Salvar Configurações</button>
+                                    <span id="config-msg" class="success-msg ml-3"></span>
+                                </div>
+                            </form>
                         </div>
                     </section>
 
@@ -270,12 +266,17 @@
                     let itemsHtml = veiculos.map(v => `
                         <div class="veiculo-item">
                             <div class="v-header">
-                                <strong>${v.motorista}</strong>
-                                <span class="badge-hora">${v.horario_mensagem}</span>
+                                <div class="motorista-box">
+                                    <span class="motorista-icone">👤</span>
+                                    <strong class="motorista-nome" title="${v.motorista}">${v.motorista}</strong>
+                                </div>
+                                <span class="badge-hora">🕒 ${v.horario_mensagem}</span>
                             </div>
                             <div class="v-body">
+                                <a class="wpp-link" href="https://wa.me/${v.telefone}" target="_blank">
+                                    <span>📱</span> ${v.telefone}
+                                </a>
                                 <span class="badge-placa">${v.placa}</span>
-                                <a class="wpp-link" href="https://wa.me/${v.telefone}" target="_blank">📱 ${v.telefone}</a>
                             </div>
                         </div>`).join('');
                         

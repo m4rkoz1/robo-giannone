@@ -181,17 +181,19 @@ async def webhook_evolution(request: Request):
         return {"status": "erro", "detalhe": str(e)}
 
 def obter_nome_grupo(jid, config):
-    if not config.get('evo_url') or not config.get('evo_apikey') or not config.get('evo_instance'):
+    if not config.get('evo_url') or not config.get('evo_instance'):
         return f"Grupo ({jid.split('@')[0][-4:]})"
     try:
-        # A API Evolution V1 e V2 usa essa rota para extrair os Info do Grupo (aonde tem o título)
-        url = f"{config['evo_url'].rstrip('/')}/group/findGroupInfos/{config['evo_instance']}?groupJid={jid}"
-        headers = {"apikey": config['evo_apikey']}
+        # A API WAHA usa essa rota para extrair os Info do Grupo
+        url = f"{config['evo_url'].rstrip('/')}/api/groups/{jid}?session={config['evo_instance']}"
+        headers = {}
+        if config.get('evo_apikey'):
+            headers["X-Api-Key"] = config['evo_apikey']
+            
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.ok:
             data = resp.json()
-            # Pode retornar em formatação antiga ou nova
-            return data.get('subject') or data.get('name') or f"Grupo ({jid.split('@')[0][-4:]})"
+            return data.get('name') or data.get('subject') or f"Grupo ({jid.split('@')[0][-4:]})"
     except:
         pass
     return f"Grupo ({jid.split('@')[0][-4:]})"
