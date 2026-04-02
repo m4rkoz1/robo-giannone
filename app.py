@@ -502,6 +502,118 @@ async def renomear_grupo(nome_grupo: str, request: Request, current_user: dict =
     conn.close()
     return {"status": "ok"}
 
+# --------- ROTA DE TESTE LLM ---------
+@app.post("/api/llm/test")
+async def test_llm(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin": raise HTTPException(status_code=403)
+    conn = get_db_connection()
+    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
+    conn.close()
+    
+    api_key = config.get("llm_api_key")
+    if not api_key:
+        return {"status": "not_configured"}
+    
+    model = config.get("llm_model") or "google/gemini-2.5-flash-lite-preview"
+    
+    try:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Responda apenas com a frase: IA funcionando corretamente."}],
+            "max_tokens": 30
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=12)
+        if r.ok:
+            data = r.json()
+            txt = data["choices"][0]["message"]["content"].strip()
+            return {"status": "ok", "model": model, "test_response": txt}
+        else:
+            return {"status": "error", "detail": f"HTTP {r.status_code}: {r.text[:200]}"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+# --------- ROTA DE CHAT IA (ASSISTENTE) ---------
+class ChatRequest(BaseModel):
+    pergunta: str
+
+@app.post("/api/chat")
+async def chat_ia(req: ChatRequest, current_user: dict = Depends(get_current_user)):
+    conn = get_db_connection()
+    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
+    
+    api_key = config.get("llm_api_key")
+    if not api_key:
+        conn.close()
+        raise HTTPException(status_code=400, detail="IA não configurada. Adicione a API Key do OpenRouter nas Configurações.")
+    
+    model = config.get("llm_model") or "google/gemini-2.5-flash-lite-preview"
+    
+    # Montar contexto com dados reais do sistema
+    hoje = date.today().strftime("%Y-%m-%d")
+    veiculos_hoje = conn.execute("SELECT * FROM veiculos WHERE data_operacao = ?", (hoje,)).fetchall()
+    conn.close()
+    
+    total = len(veiculos_hoje)
+    disponiveis = [dict(v) for v in veiculos_hoje if v["status"] == "Disponível"]
+    indisponiveis = [dict(v) for v in veiculos_hoje if v["status"] == "Indisponível"]
+    
+    # Agrupar por grupo
+    grupos = {}
+    for v in veiculos_hoje:
+        g = v["grupo"]
+        if g not in grupos: grupos[g] = []
+        grupos[g].append(dict(v))
+    
+    resumo_grupos = ""
+    for g, vs in grupos.items():
+        placas = ", ".join([f"{v['placa']} ({v['motorista']})" for v in vs])
+        resumo_grupos += f"  - {g}: {placas}\n"
+    
+    resumo_disp = ", ".join([f"{v['placa']} ({v['motorista']})" for v in disponiveis]) or "Nenhum"
+    resumo_indisp = ", ".join([f"{v['placa']} ({v['motorista']})" for v in indisponiveis]) or "Nenhum"
+    
+    system_prompt = f"""Você é o Assistente Inteligente da Giannone Transportes, uma empresa de logística e transporte rodoviário.
+Sua função é responder perguntas sobre o sistema de monitoramento de veículos, baseando-se nos dados reais abaixo.
+
+## DADOS DO SISTEMA (Hoje: {hoje})
+- Total de registros hoje: {total}
+- Disponíveis ({len(disponiveis)}): {resumo_disp}
+- Indisponíveis ({len(indisponiveis)}): {resumo_indisp}
+
+## POR GRUPO:
+{resumo_grupos if resumo_grupos else "Nenhum grupo registrado hoje."}
+
+## REGRAS:
+- Responda SEMPRE em português do Brasil.
+- Seja conciso, objetivo e profissional.
+- Se perguntarem sobre uma placa específica, procure nos dados acima.
+- Se não tiver a informação, diga que não há dados disponíveis.
+- Formate respostas com negrito (**texto**) quando necessário para destacar informações importantes.
+"""
+    
+    try:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": req.pergunta}
+            ],
+            "max_tokens": 800
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        if r.ok:
+            data = r.json()
+            txt = data["choices"][0]["message"]["content"].strip()
+            return {"resposta": txt}
+        else:
+            raise Exception(f"HTTP {r.status_code}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro na IA: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

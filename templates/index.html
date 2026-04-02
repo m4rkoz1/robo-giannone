@@ -41,6 +41,7 @@
                 </div>
                 <ul class="nav-links">
                     <li><button onclick="switchTab('lista')" class="nav-btn active">📑 Lista Diária</button></li>
+                    <li id="nav-chat"><button onclick="switchTab('chat')" class="nav-btn">💬 Assistente IA</button></li>
                     <li id="nav-configs"><button onclick="switchTab('configs')" class="nav-btn">⚙️ Configurações</button></li>
                     <li id="nav-users"><button onclick="switchTab('users')" class="nav-btn">👥 Usuários</button></li>
                 </ul>
@@ -72,75 +73,178 @@
                                 <button onclick="toggleCompactMode()" class="btn outline small" style="padding: 0.5rem 1rem; margin-left: 0.5rem;" id="btn-compact">Modo: Tela Completa</button>
                             </div>
                         </div>
-
                         <div class="groups-container mt-4" id="veiculos-grid">
                             <!-- JS Renderiza Cards por Grupo -->
                         </div>
                     </section>
 
-                    <!-- Tab Configs (Admin) -->
-                    <section id="tab-configs" class="tab-content hidden glass-card mt-4 p-4">
-                        <div class="split-view">
-                            <div class="form-area" style="max-width: 600px;">
-                                <h3>Regras de Filtro das Mensagens</h3>
-                                <p class="subtitle mt-1 mb-4">Aceita formatação avançada (Regex).</p>
-                                <form id="config-form" class="mt-2">
-                                    <div class="input-group">
-                                        <label>Palavra-Chave</label>
-                                        <input type="text" id="config-palavra" placeholder="Ex: disponivel">
+                    <!-- ============================================ -->
+                    <!--           TAB ASSISTENTE IA (CHAT)           -->
+                    <!-- ============================================ -->
+                    <section id="tab-chat" class="tab-content hidden">
+                        <div class="chat-container">
+                            <div class="chat-messages" id="chat-messages">
+                                <div class="chat-bubble assistant">
+                                    <div class="chat-avatar">🤖</div>
+                                    <div class="chat-content">
+                                        <p>Olá! Sou o assistente inteligente da <strong>Giannone Transportes</strong>. Posso responder perguntas sobre:</p>
+                                        <ul style="margin:0.5rem 0 0 1rem; font-size:0.9rem; color:#94a3b8">
+                                            <li>Veículos disponíveis e indisponíveis de hoje</li>
+                                            <li>Placas, motoristas e grupos</li>
+                                            <li>Estatísticas e resumos do sistema</li>
+                                            <li>Qualquer dúvida operacional</li>
+                                        </ul>
                                     </div>
-                                    <div class="input-group mt-3">
-                                        <label>Padrão de Placa</label>
-                                        <input type="text" id="config-regex" placeholder="Padrão das Placas">
-                                    <div class="input-group mt-3">
-                                        <label>Mensagem de Alerta (Auto-Responder)</label>
-                                        <p class="helper" style="margin-top: -5px; margin-bottom: 5px;">Essa mensagem será enviada se a palavra for detectada sem placa. Deixe em branco se quiser manter o padrão.</p>
-                                        <textarea id="config-msg-erro" rows="3" placeholder="⚠️ Ops, faltou uma informação!"></textarea>
-                                    </div>
+                                </div>
+                            </div>
+                            <form id="chat-form" class="chat-input-area">
+                                <input type="text" id="chat-input" placeholder="Faça uma pergunta sobre o sistema..." autocomplete="off">
+                                <button type="submit" class="btn primary chat-send-btn" id="chat-send-btn">
+                                    <span>Enviar</span>
+                                </button>
+                            </form>
+                        </div>
+                    </section>
 
-                                    <h3 class="mt-5 border-t pt-4">Inteligência Artificial (OpenRouter)</h3>
-                                    <p class="subtitle mb-4">Adicione uma IA para extrair as placas de textos confusos automaticamente.</p>
+                    <!-- ============================================ -->
+                    <!--           TAB CONFIGURAÇÕES (ADMIN)          -->
+                    <!-- ============================================ -->
+                    <section id="tab-configs" class="tab-content hidden">
+                        <div class="config-grid">
+                            <!-- CARD 1: Status do Sistema -->
+                            <div class="config-card glass-card">
+                                <div class="config-card-header">
+                                    <span class="config-icon">📡</span>
+                                    <h3>Status do Sistema</h3>
+                                </div>
+                                <p class="config-desc">Monitore se todas as conexões estão ativas e funcionais.</p>
+                                <div class="status-grid">
+                                    <div class="status-item" id="status-webhook">
+                                        <div class="status-dot loading"></div>
+                                        <div>
+                                            <strong>Webhook WAHA</strong>
+                                            <span class="status-detail" id="webhook-detail">Verificando...</span>
+                                        </div>
+                                    </div>
+                                    <div class="status-item" id="status-waha">
+                                        <div class="status-dot loading"></div>
+                                        <div>
+                                            <strong>Conexão WAHA</strong>
+                                            <span class="status-detail" id="waha-detail">Verificando...</span>
+                                        </div>
+                                    </div>
+                                    <div class="status-item" id="status-llm">
+                                        <div class="status-dot loading"></div>
+                                        <div>
+                                            <strong>Inteligência Artificial</strong>
+                                            <span class="status-detail" id="llm-detail">Verificando...</span>
+                                        </div>
+                                    </div>
+                                    <div class="status-item" id="status-db">
+                                        <div class="status-dot loading"></div>
+                                        <div>
+                                            <strong>Banco de Dados</strong>
+                                            <span class="status-detail" id="db-detail">Verificando...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="button" onclick="runDiagnostics()" class="btn secondary mt-4" style="width:100%">🔄 Executar Diagnóstico Completo</button>
+                            </div>
+
+                            <!-- CARD 2: Inteligência Artificial -->
+                            <div class="config-card glass-card">
+                                <div class="config-card-header">
+                                    <span class="config-icon">🧠</span>
+                                    <h3>Inteligência Artificial</h3>
+                                </div>
+                                <p class="config-desc">Conecte uma LLM via OpenRouter para extrair placas com IA.</p>
+                                <form id="llm-form" class="config-form-inner">
                                     <div class="input-group">
-                                        <label>API Key do OpenRouter (Deixe em branco para usar Regex Clássico)</label>
+                                        <label>API Key (OpenRouter)</label>
                                         <input type="password" id="llm-api-key" placeholder="sk-or-v1-...">
                                     </div>
-                                    <div class="input-group mt-3">
+                                    <div class="input-group mt-2">
                                         <label>Modelo LLM</label>
-                                        <input type="text" id="llm-model" placeholder="ex: google/gemini-2.5-flash-lite-preview">
+                                        <input type="text" id="llm-model" placeholder="google/gemini-2.5-flash-lite-preview">
                                     </div>
-
-                                    <h3 class="mt-5 border-t pt-4">Configuração WAHA API</h3>
-                                    <p class="subtitle mb-4">Necessário para capturar os Nomes Reais dos Grupos.</p>
-                                    <div class="input-group">
-                                        <label>URL Base da WAHA</label>
-                                        <input type="text" id="evo-url" placeholder="Ex: https://waha.meudominio.com">
-                                    </div>
-                                    <div class="input-group mt-3">
-                                        <label>Nome da Sessão (Session)</label>
-                                        <input type="text" id="evo-instance" placeholder="Ex: default">
-                                    </div>
-                                    <div class="input-group mt-3">
-                                        <label>Chave API (Waha Plus - Opcional)</label>
-                                        <input type="password" id="evo-apikey" placeholder="Somente se configurado">
-                                    </div>
-                                    <div class="mt-4 flex align-center">
-                                        <button type="submit" class="btn primary">Salvar Configurações</button>
-                                        <span id="config-msg" class="success-msg ml-3"></span>
+                                    <div class="config-actions mt-2">
+                                        <button type="button" onclick="testLLM(this)" class="btn outline small">🧪 Testar IA</button>
+                                        <span class="config-status-msg" id="llm-test-msg"></span>
                                     </div>
                                 </form>
                             </div>
-                            <div class="list-area pl-4">
-                                <h3>Ferramentas WAHA</h3>
-                                <p class="helper">Teste sua conexão ou recupere mensagens passadas.</p>
-                                <button type="button" onclick="pingWaha(this)" class="btn secondary mt-2" id="pingwaha">📡 Testar Conexão WAHA</button>
-                                <button type="button" onclick="syncWaha(this)" class="btn secondary mt-2" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd;">🔄 Puxar Mensagens (Histórico)</button>
-                                
-                                <h3 class="mt-5 border-t pt-4">Monitor do Webhook</h3>
-                                <p class="helper" style="margin-bottom:0.8rem">Momento do último sinal recebido:</p>
-                                <div class="glass-card p-3 text-center" style="background: rgba(15, 23, 42, 0.5);">
-                                    <strong id="last-hook-time" style="color:#34d399; font-size:0.9rem">Aguardando...</strong>
+
+                            <!-- CARD 3: Regras de Filtro -->
+                            <div class="config-card glass-card">
+                                <div class="config-card-header">
+                                    <span class="config-icon">🔍</span>
+                                    <h3>Regras de Filtro</h3>
                                 </div>
-                                <button type="button" onclick="checkHook(this)" class="btn secondary mt-2" style="font-size:0.8rem; padding: 0.5rem; width:100%;">🔄 Atualizar Status Local</button>
+                                <p class="config-desc">Palavra-chave e padrão Regex (usado quando a IA está desativada).</p>
+                                <div class="config-form-inner">
+                                    <div class="input-group">
+                                        <label>Palavra-Chave (Regex)</label>
+                                        <input type="text" id="config-palavra" placeholder="dispon[ií]vel">
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>Padrão de Placa (Regex)</label>
+                                        <input type="text" id="config-regex" placeholder="\b[A-Za-z]{3}...">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- CARD 4: Auto-Responder -->
+                            <div class="config-card glass-card">
+                                <div class="config-card-header">
+                                    <span class="config-icon">💬</span>
+                                    <h3>Auto-Responder</h3>
+                                </div>
+                                <p class="config-desc">Mensagem enviada pelo WhatsApp quando o motorista não informa a placa.</p>
+                                <div class="config-form-inner">
+                                    <div class="input-group">
+                                        <label>Mensagem de Alerta</label>
+                                        <textarea id="config-msg-erro" rows="3" placeholder="⚠️ Ops, faltou uma informação!"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- CARD 5: Ferramentas -->
+                            <div class="config-card glass-card">
+                                <div class="config-card-header">
+                                    <span class="config-icon">🛠️</span>
+                                    <h3>Ferramentas</h3>
+                                </div>
+                                <p class="config-desc">Ações administrativas e sincronização de dados.</p>
+                                <div class="tools-grid">
+                                    <button type="button" onclick="syncWaha(this)" class="tool-btn">
+                                        <span class="tool-icon">🔄</span>
+                                        <span class="tool-label">Puxar Histórico</span>
+                                        <span class="tool-desc">Importar mensagens passadas da WAHA</span>
+                                    </button>
+                                    <button type="button" onclick="pingWaha(this)" class="tool-btn">
+                                        <span class="tool-icon">📡</span>
+                                        <span class="tool-label">Testar WAHA</span>
+                                        <span class="tool-desc">Verificar conectividade da API</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- CARD 6: Conexão WAHA (Campos ocultos que mantêm os dados) -->
+                            <div class="config-card glass-card" style="display:none">
+                                <input type="hidden" id="evo-url">
+                                <input type="hidden" id="evo-instance">
+                                <input type="hidden" id="evo-apikey">
+                            </div>
+                        </div>
+
+                        <!-- BOTÃO SALVAR GLOBAL -->
+                        <div class="save-bar glass-card mt-4">
+                            <div class="save-bar-inner">
+                                <span class="save-hint">Todas as alterações acima serão salvas de uma vez.</span>
+                                <div style="display:flex;align-items:center;gap:1rem">
+                                    <span id="config-msg" class="success-msg"></span>
+                                    <button type="button" onclick="saveAllConfig()" class="btn primary" style="width:auto;padding:0.7rem 2rem">💾 Salvar Tudo</button>
+                                </div>
                             </div>
                         </div>
                     </section>
@@ -239,7 +343,6 @@
                 document.getElementById('nav-configs').style.display = 'block';
                 document.getElementById('nav-users').style.display = 'block';
                 loadConfig();
-                checkHook();
                 loadUsers();
             }
             loadVeiculos();
@@ -287,7 +390,11 @@
             
             switch(tabId) {
                 case 'lista': document.getElementById('page-title').textContent = 'Lista de Veículos Disponíveis'; break;
-                case 'configs': document.getElementById('page-title').textContent = 'Configurações de Leitura Webhook'; break;
+                case 'chat': document.getElementById('page-title').textContent = 'Assistente Inteligente'; break;
+                case 'configs': 
+                    document.getElementById('page-title').textContent = 'Centro de Controle'; 
+                    runDiagnostics();
+                    break;
                 case 'users': document.getElementById('page-title').textContent = 'Gerenciamento de Painel'; break;
             }
         }
@@ -301,6 +408,7 @@
             return req.json();
         }
 
+        // ===================== LISTA DIÁRIA =====================
         async function loadVeiculos() {
             const date = document.getElementById('filter-date').value;
             const grid = document.getElementById('veiculos-grid');
@@ -313,14 +421,12 @@
                     return;
                 }
                 
-                // Agrupar por grupo
                 const grouped = {};
                 data.forEach(v => {
                     if(!grouped[v.grupo]) grouped[v.grupo] = [];
                     grouped[v.grupo].push(v);
                 });
 
-                // Renderizar Cards Individuais usando CSS Grid
                 for (const [nomeGrupo, veiculos] of Object.entries(grouped)) {
                     let itemsHtml = veiculos.map(v => {
                         let statusHtml = v.status === 'Indisponível' 
@@ -343,18 +449,15 @@
                                     ${adminVeiculoControls}
                                 </div>
                             </div>
-                            
                             <div style="margin-bottom:0.8rem;">
                                 ${statusHtml}
                             </div>
-                            
                             <div class="v-body">
                                 <a class="wpp-link" href="https://wa.me/${v.telefone}" target="_blank">
                                     <span>📱</span> ${v.telefone}
                                 </a>
                                 <span class="badge-placa">${v.placa}</span>
                             </div>
-                            
                             <div class="msg-box">
                                 "${v.mensagem_original}"
                             </div>
@@ -381,83 +484,241 @@
             } catch(e) { grid.innerHTML = `<div class="error-msg text-center">Erro ao carregar</div>`; }
         }
 
+        // ===================== CONFIGURAÇÕES =====================
         async function loadConfig() {
             if(role !== 'admin') return;
-            const config = await fetchAPI('/api/config');
-            document.getElementById('config-palavra').value = config.palavra_chave || '';
-            document.getElementById('config-regex').value = config.regex_placa || '';
-            document.getElementById('config-msg-erro').value = config.msg_erro_placa || '';
-            document.getElementById('llm-api-key').value = config.llm_api_key || '';
-            document.getElementById('llm-model').value = config.llm_model || 'google/gemini-2.5-flash-lite-preview';
-            document.getElementById('evo-url').value = config.evo_url || '';
-            document.getElementById('evo-instance').value = config.evo_instance || '';
-            document.getElementById('evo-apikey').value = config.evo_apikey || '';
+            try {
+                const config = await fetchAPI('/api/config');
+                document.getElementById('config-palavra').value = config.palavra_chave || '';
+                document.getElementById('config-regex').value = config.regex_placa || '';
+                document.getElementById('config-msg-erro').value = config.msg_erro_placa || '';
+                document.getElementById('llm-api-key').value = config.llm_api_key || '';
+                document.getElementById('llm-model').value = config.llm_model || 'google/gemini-2.5-flash-lite-preview';
+                document.getElementById('evo-url').value = config.evo_url || '';
+                document.getElementById('evo-instance').value = config.evo_instance || '';
+                document.getElementById('evo-apikey').value = config.evo_apikey || '';
+            } catch(e) {}
         }
 
-        document.getElementById('config-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const palavra = document.getElementById('config-palavra').value;
-            const regex = document.getElementById('config-regex').value;
-            const msg_erro = document.getElementById('config-msg-erro').value;
-            const llmKey = document.getElementById('llm-api-key').value;
-            const llmModel = document.getElementById('llm-model').value;
-            const evoUrl = document.getElementById('evo-url').value;
-            const evoInst = document.getElementById('evo-instance').value;
-            const evoKey = document.getElementById('evo-apikey').value;
-            
+        async function saveAllConfig() {
+            const btn = event.currentTarget;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⏳ Salvando...';
+            btn.disabled = true;
+
             try {
                 await fetchAPI('/api/config', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        palavra_chave: palavra, 
-                        regex_placa: regex,
-                        msg_erro_placa: msg_erro,
-                        llm_api_key: llmKey,
-                        llm_model: llmModel,
-                        evo_url: evoUrl,
-                        evo_instance: evoInst,
-                        evo_apikey: evoKey
+                        palavra_chave: document.getElementById('config-palavra').value,
+                        regex_placa: document.getElementById('config-regex').value,
+                        msg_erro_placa: document.getElementById('config-msg-erro').value,
+                        llm_api_key: document.getElementById('llm-api-key').value,
+                        llm_model: document.getElementById('llm-model').value,
+                        evo_url: document.getElementById('evo-url').value,
+                        evo_instance: document.getElementById('evo-instance').value,
+                        evo_apikey: document.getElementById('evo-apikey').value
                     })
                 });
                 const msg = document.getElementById('config-msg');
-                msg.textContent = 'Salvo com sucesso!';
-                setTimeout(()=> msg.textContent='', 3000);
-            } catch(e) { alert('Erro ao salvar config: ' + e.message); }
-        });
+                msg.textContent = '✅ Configurações salvas com sucesso!';
+                msg.style.color = '#34d399';
+                setTimeout(() => msg.textContent = '', 4000);
+            } catch(e) { 
+                alert('Erro ao salvar: ' + e.message); 
+            }
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
 
-        async function checkHook(btn) {
-            const original = btn ? btn.textContent : '';
-            if(btn) btn.textContent = 'Buscando...';
+        // ===================== DIAGNÓSTICOS =====================
+        async function runDiagnostics() {
+            // 1. Webhook
+            setStatus('status-webhook', 'loading', 'Verificando...');
+            setStatus('status-waha', 'loading', 'Verificando...');
+            setStatus('status-llm', 'loading', 'Verificando...');
+            setStatus('status-db', 'loading', 'Verificando...');
+
+            // DB check
+            try {
+                const veiculos = await fetchAPI('/api/disponiveis');
+                setStatus('status-db', 'ok', `OK — ${veiculos.length} registros hoje`);
+            } catch(e) {
+                setStatus('status-db', 'error', 'Erro ao acessar banco');
+            }
+
+            // Webhook
             try {
                 const res = await fetchAPI('/api/webhook/status');
-                document.getElementById('last-hook-time').textContent = res.last_hook;
-            } catch(e) {}
-            if(btn) btn.textContent = original;
+                const txt = res.last_hook;
+                if(txt && txt.includes('Recebido')) {
+                    setStatus('status-webhook', 'ok', txt);
+                } else {
+                    setStatus('status-webhook', 'warn', txt || 'Nenhum evento recebido');
+                }
+            } catch(e) {
+                setStatus('status-webhook', 'error', 'Falha na verificação');
+            }
+
+            // WAHA
+            try {
+                const res = await fetchAPI('/api/waha/ping', { method: 'POST' });
+                setStatus('status-waha', 'ok', res.status);
+            } catch(e) {
+                setStatus('status-waha', 'error', 'Desconectado ou não configurado');
+            }
+
+            // LLM
+            try {
+                const res = await fetchAPI('/api/llm/test', { method: 'POST' });
+                if(res.status === 'ok') {
+                    setStatus('status-llm', 'ok', `Modelo: ${res.model} — Funcionando`);
+                } else if(res.status === 'not_configured') {
+                    setStatus('status-llm', 'warn', 'Não configurada (usando Regex)');
+                } else {
+                    setStatus('status-llm', 'error', res.detail || 'Erro');
+                }
+            } catch(e) {
+                setStatus('status-llm', 'warn', 'Não configurada ou erro');
+            }
+        }
+
+        function setStatus(elementId, status, detail) {
+            const el = document.getElementById(elementId);
+            const dot = el.querySelector('.status-dot');
+            const detailEl = el.querySelector('.status-detail');
+            dot.className = 'status-dot ' + status;
+            detailEl.textContent = detail;
+        }
+
+        async function testLLM(btn) {
+            const msg = document.getElementById('llm-test-msg');
+            const original = btn.textContent;
+            btn.textContent = '⏳ Testando...';
+            btn.disabled = true;
+            msg.textContent = '';
+            try {
+                // Salva primeiro para que o teste use a chave atualizada
+                await saveAllConfig();
+                const res = await fetchAPI('/api/llm/test', { method: 'POST' });
+                if(res.status === 'ok') {
+                    msg.textContent = `✅ IA funcionando! Resposta: "${res.test_response}"`;
+                    msg.style.color = '#34d399';
+                } else if(res.status === 'not_configured') {
+                    msg.textContent = '⚠️ API Key não preenchida.';
+                    msg.style.color = '#fbbf24';
+                } else {
+                    msg.textContent = '❌ ' + (res.detail || 'Erro desconhecido');
+                    msg.style.color = '#ef4444';
+                }
+            } catch(e) { 
+                msg.textContent = '❌ ' + e.message;
+                msg.style.color = '#ef4444';
+            }
+            btn.textContent = original;
+            btn.disabled = false;
         }
 
         async function pingWaha(btn) {
-            const original = btn.textContent;
-            btn.textContent = "Testando...";
+            const original = btn.querySelector('.tool-label').textContent;
+            btn.querySelector('.tool-label').textContent = 'Testando...';
             try {
                 const res = await fetchAPI('/api/waha/ping', {method: 'POST'});
-                alert(res.status);
-            } catch(e) { alert('Erro: ' + e.message); }
-            btn.textContent = original;
+                alert('✅ ' + res.status);
+            } catch(e) { alert('❌ Erro: ' + e.message); }
+            btn.querySelector('.tool-label').textContent = original;
         }
 
         async function syncWaha(btn) {
-            const original = btn.textContent;
-            btn.textContent = "Baixando Histórico...";
+            const original = btn.querySelector('.tool-label').textContent;
+            btn.querySelector('.tool-label').textContent = 'Baixando...';
             try {
                 const res = await fetchAPI('/api/waha/sync', {method: 'POST'});
-                alert(res.status);
+                alert('✅ ' + res.status);
                 loadVeiculos();
-            } catch(e) { alert('Erro: ' + e.message); }
-            btn.textContent = original;
+            } catch(e) { alert('❌ Erro: ' + e.message); }
+            btn.querySelector('.tool-label').textContent = original;
         }
 
-        // Users Management
+        // ===================== CHAT IA =====================
+        document.getElementById('chat-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            const msg = input.value.trim();
+            if(!msg) return;
+
+            appendChatBubble('user', msg);
+            input.value = '';
+            
+            const sendBtn = document.getElementById('chat-send-btn');
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span>⏳</span>';
+
+            // Typing indicator
+            const typingId = 'typing-' + Date.now();
+            appendTypingIndicator(typingId);
+
+            try {
+                const res = await fetchAPI('/api/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ pergunta: msg })
+                });
+                removeTypingIndicator(typingId);
+                appendChatBubble('assistant', res.resposta);
+            } catch(err) {
+                removeTypingIndicator(typingId);
+                appendChatBubble('assistant', '❌ Erro ao processar: ' + err.message);
+            }
+
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<span>Enviar</span>';
+        });
+
+        function appendChatBubble(role, text) {
+            const container = document.getElementById('chat-messages');
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble ' + role;
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'chat-avatar';
+            avatar.textContent = role === 'user' ? '👤' : '🤖';
+
+            const content = document.createElement('div');
+            content.className = 'chat-content';
+            // Suporta markdown leve: negrito, itálico e linebreaks
+            content.innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                     .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                                     .replace(/\n/g, '<br>');
+            
+            bubble.appendChild(avatar);
+            bubble.appendChild(content);
+            container.appendChild(bubble);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function appendTypingIndicator(id) {
+            const container = document.getElementById('chat-messages');
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble assistant typing-indicator';
+            bubble.id = id;
+            bubble.innerHTML = `
+                <div class="chat-avatar">🤖</div>
+                <div class="chat-content">
+                    <div class="typing-dots"><span></span><span></span><span></span></div>
+                </div>
+            `;
+            container.appendChild(bubble);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function removeTypingIndicator(id) {
+            const el = document.getElementById(id);
+            if(el) el.remove();
+        }
+
+        // ===================== USERS =====================
         async function loadUsers() {
             if(role !== 'admin') return;
             const list = document.getElementById('users-list');
