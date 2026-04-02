@@ -207,7 +207,7 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
             if isinstance(msgs, dict): msgs = msgs.get("data", [])
             for m in msgs:
                 # Simula o payload de webhook WAHA
-                processar_mensagem_webhook({"event": "message", "payload": m})
+                processar_mensagem_webhook({"event": "message", "payload": m}, is_sync=True)
             return {"status": f"Histórico Sincronizado! ({len(msgs)} lidas)"}
         else:
             raise Exception(f"HTTP {r.status_code}: {r.text}")
@@ -261,7 +261,9 @@ def processar_mensagem_apagada(payload, is_waha):
     finally:
         conn.close()
 
+CACHE_GRUPOS = {}
 def obter_nome_grupo(jid, config):
+    if jid in CACHE_GRUPOS: return CACHE_GRUPOS[jid]
     if not config.get('evo_url') or not config.get('evo_instance'):
         return f"Grupo ({jid.split('@')[0][-4:]})"
     try:
@@ -274,7 +276,10 @@ def obter_nome_grupo(jid, config):
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.ok:
             data = resp.json()
-            return data.get('name') or data.get('subject') or f"Grupo ({jid.split('@')[0][-4:]})"
+            nome = data.get('name') or data.get('subject')
+            if nome:
+                CACHE_GRUPOS[jid] = nome
+                return nome
     except:
         pass
     return f"Grupo ({jid.split('@')[0][-4:]})"
@@ -302,7 +307,7 @@ def enviar_reposta(jid, texto, config):
     except:
         pass
 
-def processar_mensagem_webhook(payload: dict):
+def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
     conn = get_db_connection()
     config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
     conn.close()
@@ -384,9 +389,10 @@ def processar_mensagem_webhook(payload: dict):
             
     if not placa:
         # 3. Responde exigindo a placa se o admin escreveu uma mensagem pra isso. Do contrário, usa default
-        msg_alerta = config.get("msg_erro_placa", "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso.")
-        if msg_alerta:
-            enviar_reposta(remote_jid, msg_alerta, config)
+        if not is_sync:
+            msg_alerta = config.get("msg_erro_placa", "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso.")
+            if msg_alerta:
+                enviar_reposta(remote_jid, msg_alerta, config)
         return
     telefone = telefone_bruto.split("@")[0].split(":")[0]  
     
