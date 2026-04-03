@@ -539,9 +539,6 @@ async def test_llm(current_user: dict = Depends(get_current_user)):
         return {"status": "error", "detail": str(e)}
 
 # --------- ROTA DE CHAT IA (ASSISTENTE) ---------
-class ChatRequest(BaseModel):
-    pergunta: str
-
 @app.post("/api/chat")
 async def chat_ia(req: ChatRequest, current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
@@ -550,51 +547,79 @@ async def chat_ia(req: ChatRequest, current_user: dict = Depends(get_current_use
     api_key = config.get("llm_api_key")
     if not api_key:
         conn.close()
-        raise HTTPException(status_code=400, detail="IA não configurada. Adicione a API Key do OpenRouter nas Configurações.")
+        raise HTTPException(status_code=400, detail="IA não configurada. Adicione a API Key nas Configurações.")
     
     model = config.get("llm_model") or "meta/llama-3.3-70b-instruct"
     
-    # Montar contexto com dados reais do sistema
+    # ===== CONTEXTO COMPLETO DO BANCO DE DADOS =====
     hoje = date.today().strftime("%Y-%m-%d")
-    veiculos_hoje = conn.execute("SELECT * FROM veiculos WHERE data_operacao = ?", (hoje,)).fetchall()
+    
+    # Dados de HOJE (detalhados)
+    veiculos_hoje = conn.execute("SELECT * FROM veiculos WHERE data_operacao = ? ORDER BY grupo, horario_mensagem", (hoje,)).fetchall()
+    
+    # Dados dos últimos 7 dias (resumo por dia)
+    semana = (date.today() - timedelta(days=7)).strftime("%Y-%m-%d")
+    historico = conn.execute(
+        "SELECT data_operacao, COUNT(*) as total, SUM(CASE WHEN status = 'Disponível' THEN 1 ELSE 0 END) as disp, SUM(CASE WHEN status = 'Indisponível' THEN 1 ELSE 0 END) as indisp FROM veiculos WHERE data_operacao >= ? GROUP BY data_operacao ORDER BY data_operacao DESC",
+        (semana,)
+    ).fetchall()
+    
+    # Total geral no banco
+    total_geral = conn.execute("SELECT COUNT(*) FROM veiculos").fetchone()[0]
+    total_grupos = conn.execute("SELECT COUNT(DISTINCT grupo) FROM veiculos WHERE data_operacao = ?", (hoje,)).fetchone()[0]
+    
     conn.close()
     
-    total = len(veiculos_hoje)
+    # Montar detalhamento de hoje
     disponiveis = [dict(v) for v in veiculos_hoje if v["status"] == "Disponível"]
     indisponiveis = [dict(v) for v in veiculos_hoje if v["status"] == "Indisponível"]
     
-    # Agrupar por grupo
+    # Detalhamento por grupo
     grupos = {}
     for v in veiculos_hoje:
         g = v["grupo"]
         if g not in grupos: grupos[g] = []
         grupos[g].append(dict(v))
     
-    resumo_grupos = ""
+    detalhe_grupos = ""
     for g, vs in grupos.items():
-        placas = ", ".join([f"{v['placa']} ({v['motorista']})" for v in vs])
-        resumo_grupos += f"  - {g}: {placas}\n"
+        detalhe_grupos += f"\n### Grupo: {g} ({len(vs)} veículos)\n"
+        for v in vs:
+            status_emoji = "🟢" if v['status'] == "Disponível" else "🔴"
+            detalhe_grupos += f"  {status_emoji} Placa: {v['placa']} | Motorista: {v['motorista']} | Tel: {v['telefone']} | Hora: {v['horario_mensagem']} | Status: {v['status']} | Msg: \"{v['mensagem_original']}\"\n"
     
-    resumo_disp = ", ".join([f"{v['placa']} ({v['motorista']})" for v in disponiveis]) or "Nenhum"
-    resumo_indisp = ", ".join([f"{v['placa']} ({v['motorista']})" for v in indisponiveis]) or "Nenhum"
+    # Histórico semanal
+    historico_txt = ""
+    for h in historico:
+        historico_txt += f"  - {h['data_operacao']}: {h['total']} registros ({h['disp']} disponíveis, {h['indisp']} indisponíveis)\n"
     
     system_prompt = f"""Você é o Assistente Inteligente da Giannone Transportes, uma empresa de logística e transporte rodoviário.
-Sua função é responder perguntas sobre o sistema de monitoramento de veículos, baseando-se nos dados reais abaixo.
+Sua função é responder perguntas sobre o sistema de monitoramento de veículos com base nos dados REAIS do banco de dados fornecidos abaixo.
 
-## DADOS DO SISTEMA (Hoje: {hoje})
-- Total de registros hoje: {total}
-- Disponíveis ({len(disponiveis)}): {resumo_disp}
-- Indisponíveis ({len(indisponiveis)}): {resumo_indisp}
+## RESUMO DE HOJE ({hoje})
+- Total de veículos registrados: {len(veiculos_hoje)}
+- Disponíveis: {len(disponiveis)}
+- Indisponíveis: {len(indisponiveis)}
+- Grupos ativos: {total_grupos}
 
-## POR GRUPO:
-{resumo_grupos if resumo_grupos else "Nenhum grupo registrado hoje."}
+## DETALHAMENTO POR GRUPO (HOJE):
+{detalhe_grupos if detalhe_grupos else "Nenhum veículo registrado hoje."}
 
-## REGRAS:
+## HISTÓRICO SEMANAL:
+{historico_txt if historico_txt else "Sem dados históricos."}
+
+## ESTATÍSTICAS GERAIS:
+- Total de registros no banco: {total_geral}
+
+## REGRAS DE RESPOSTA:
 - Responda SEMPRE em português do Brasil.
 - Seja conciso, objetivo e profissional.
-- Se perguntarem sobre uma placa específica, procure nos dados acima.
-- Se não tiver a informação, diga que não há dados disponíveis.
-- Formate respostas com negrito (**texto**) quando necessário para destacar informações importantes.
+- Se perguntarem sobre uma placa específica, procure nos dados acima e informe motorista, telefone, grupo e horário.
+- Se perguntarem sobre um motorista, procure pelo nome nos dados.
+- Se pedirem um resumo, forneça os números e destaque informações relevantes.
+- Se não tiver a informação, diga claramente que não há dados disponíveis.
+- Formate respostas com negrito (**texto**) para destacar informações importantes.
+- Use listas e estrutura quando necessário para facilitar a leitura.
 """
     
     try:
@@ -606,18 +631,19 @@ Sua função é responder perguntas sobre o sistema de monitoramento de veículo
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": req.pergunta}
             ],
-            "max_tokens": 800
+            "max_tokens": 1200
         }
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        r = requests.post(url, headers=headers, json=payload, timeout=25)
         if r.ok:
             data = r.json()
             txt = data["choices"][0]["message"]["content"].strip()
             return {"resposta": txt}
         else:
-            raise Exception(f"HTTP {r.status_code}")
+            raise Exception(f"HTTP {r.status_code}: {r.text[:300]}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro na IA: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

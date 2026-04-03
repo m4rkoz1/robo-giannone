@@ -808,6 +808,22 @@ input:focus, select:focus, textarea:focus {
     gap: 0.4rem;
 }
 
+.chat-clear-btn {
+    width: auto !important;
+    padding: 0.7rem 0.9rem !important;
+    border-radius: 50% !important;
+    font-size: 1rem;
+    flex-shrink: 0;
+    opacity: 0.6;
+    transition: all 0.2s;
+}
+
+.chat-clear-btn:hover {
+    opacity: 1;
+    background: rgba(239, 68, 68, 0.15) !important;
+    border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
 /* Typing dots */
 .typing-dots {
     display: flex;

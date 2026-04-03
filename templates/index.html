@@ -98,6 +98,7 @@
                                 </div>
                             </div>
                             <form id="chat-form" class="chat-input-area">
+                                <button type="button" onclick="clearChat()" class="btn outline chat-clear-btn" title="Limpar conversa">🗑️</button>
                                 <input type="text" id="chat-input" placeholder="Faça uma pergunta sobre o sistema..." autocomplete="off">
                                 <button type="submit" class="btn primary chat-send-btn" id="chat-send-btn">
                                     <span>Enviar</span>
@@ -755,6 +756,18 @@
         function removeTypingIndicator(id) {
             const el = document.getElementById(id);
             if(el) el.remove();
+        }
+
+        function clearChat() {
+            const container = document.getElementById('chat-messages');
+            container.innerHTML = `
+                <div class="chat-bubble assistant">
+                    <div class="chat-avatar">🤖</div>
+                    <div class="chat-content">
+                        <p>Conversa limpa! Estou pronto para novas perguntas.</p>
+                    </div>
+                </div>
+            `;
         }
 
         // ===================== USERS =====================
