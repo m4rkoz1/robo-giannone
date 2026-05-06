@@ -452,7 +452,7 @@
                             : '';
                             
                         return `
-                        <div class="veiculo-item">
+                        <div class="veiculo-item" data-status="${v.status === 'Indisponível' ? 'indisp' : 'disp'}">
                             <div class="v-header">
                                 <div class="motorista-box">
                                     <span class="motorista-icone">👤</span>

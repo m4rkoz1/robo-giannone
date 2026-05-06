@@ -382,6 +382,30 @@ input:focus, select:focus, textarea:focus {
     padding: 0.3rem 0.5rem;
 }
 
+/* Compact mode: color plates by availability status */
+.compact-view .veiculo-item[data-status="disp"] {
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.compact-view .veiculo-item[data-status="disp"] .badge-placa {
+    background: linear-gradient(135deg, #34d399, #10b981);
+    color: #022c22;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15), 0 2px 8px rgba(16, 185, 129, 0.35);
+}
+
+.compact-view .veiculo-item[data-status="indisp"] {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.compact-view .veiculo-item[data-status="indisp"] .badge-placa {
+    background: linear-gradient(135deg, #f87171, #ef4444);
+    color: #450a0a;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15), 0 2px 8px rgba(239, 68, 68, 0.35);
+    text-decoration: line-through;
+}
+
 /* Scrollbar */
 .group-items::-webkit-scrollbar, .groups-container::-webkit-scrollbar {
     width: 6px;
