@@ -95,6 +95,9 @@ from pydantic import BaseModel
 class SyncData(BaseModel):
     meu_link: str
 
+class ChatRequest(BaseModel):
+    pergunta: str
+
 import requests
 @app.post("/api/evolution/sync")
 async def sync_evolution(data: SyncData, current_user: dict = Depends(get_current_user)):
