@@ -243,11 +243,31 @@
                                 </div>
                             </div>
 
-                            <!-- CARD 6: Conexão WAHA (Campos ocultos que mantêm os dados) -->
-                            <div class="config-card glass-card" style="display:none">
-                                <input type="hidden" id="evo-url">
-                                <input type="hidden" id="evo-instance">
-                                <input type="hidden" id="evo-apikey">
+                            <!-- CARD 6: Conexão WAHA -->
+                            <div class="config-card glass-card">
+                                <div class="config-card-header">
+                                    <span class="config-icon">📱</span>
+                                    <h3>Conexão WAHA / WhatsApp</h3>
+                                </div>
+                                <p class="config-desc">Configure a conexão com a API WAHA para receber mensagens do WhatsApp em tempo real.</p>
+                                <div class="config-form-inner">
+                                    <div class="input-group">
+                                        <label>URL do WAHA</label>
+                                        <input type="text" id="evo-url" placeholder="http://seu-ip:3000">
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>Nome da Sessão</label>
+                                        <input type="text" id="evo-instance" placeholder="default">
+                                    </div>
+                                    <div class="input-group mt-2">
+                                        <label>API Key (opcional)</label>
+                                        <input type="password" id="evo-apikey" placeholder="sua-api-key">
+                                    </div>
+                                    <div class="config-actions mt-2">
+                                        <button type="button" onclick="syncWebhook(this)" class="btn outline small">🔗 Configurar Webhook</button>
+                                        <span class="config-status-msg" id="waha-sync-msg"></span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -679,6 +699,38 @@
                 loadVeiculos();
             } catch(e) { alert('❌ Erro: ' + e.message); }
             btn.querySelector('.tool-label').textContent = original;
+        }
+
+        async function syncWebhook(btn) {
+            const msg = document.getElementById('waha-sync-msg');
+            const original = btn.textContent;
+            
+            // Pega a URL base do app (onde está rodando)
+            const defaultUrl = window.location.origin;
+            const meuLink = prompt('Informe a URL pública deste painel (onde o WAHA vai enviar eventos):', defaultUrl);
+            if(!meuLink) return;
+            
+            btn.textContent = '⏳ Configurando...';
+            btn.disabled = true;
+            msg.textContent = '';
+            
+            try {
+                // Salva config primeiro para garantir que os dados do WAHA estejam atualizados
+                await saveAllConfig();
+                
+                const res = await fetchAPI('/api/evolution/sync', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ meu_link: meuLink })
+                });
+                msg.textContent = '✅ ' + res.status;
+                msg.style.color = '#34d399';
+            } catch(e) {
+                msg.textContent = '❌ ' + e.message;
+                msg.style.color = '#ef4444';
+            }
+            btn.textContent = original;
+            btn.disabled = false;
         }
 
         // ===================== CHAT IA =====================

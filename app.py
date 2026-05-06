@@ -105,26 +105,52 @@ async def sync_evolution(data: SyncData, current_user: dict = Depends(get_curren
     conn = get_db_connection()
     config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone())
     conn.close()
-    if not config.get('evo_url') or not config.get('evo_instance') or not config.get('evo_apikey'):
-        raise HTTPException(status_code=400, detail="Configure a API primeiro.")
+    if not config.get('evo_url') or not config.get('evo_instance'):
+        raise HTTPException(status_code=400, detail="Configure a URL e Instância/Sessão WAHA primeiro.")
     
-    url = f"{config['evo_url'].rstrip('/')}/webhook/set/{config['evo_instance']}"
-    headers = {"apikey": config['evo_apikey'], "Content-Type": "application/json"}
-    payload = {
-        "webhook": {
-            "enabled": True,
-            "url": f"{data.meu_link.rstrip('/')}/webhook/evolution",
-            "webhookByEvents": False,
-            "webhookBase64": False,
-            "events": ["MESSAGES_UPSERT"]
-        }
-    }
+    base_url = config['evo_url'].rstrip('/')
+    session = config['evo_instance']
+    api_key = config.get('evo_apikey', '')
+    webhook_url = f"{data.meu_link.rstrip('/')}/webhook/evolution"
+    
+    # Tenta WAHA primeiro (PUT /api/sessions/{name})
     try:
-        r = requests.post(url, json=payload, headers=headers)
+        waha_url = f"{base_url}/api/sessions/{session}"
+        headers = {"accept": "application/json", "Content-Type": "application/json"}
+        if api_key: headers["X-Api-Key"] = api_key
+        payload = {
+            "config": {
+                "webhooks": [{
+                    "url": webhook_url,
+                    "events": ["message", "message.any"]
+                }]
+            }
+        }
+        r = requests.put(waha_url, json=payload, headers=headers, timeout=10)
+        if r.ok:
+            return {"status": f"Webhook WAHA configurado! Apontando para: {webhook_url}"}
+    except:
+        pass
+    
+    # Fallback: tenta Evolution API (POST /webhook/set/{instance})
+    try:
+        evo_url = f"{base_url}/webhook/set/{session}"
+        headers = {"Content-Type": "application/json"}
+        if api_key: headers["apikey"] = api_key
+        payload = {
+            "webhook": {
+                "enabled": True,
+                "url": webhook_url,
+                "webhookByEvents": False,
+                "webhookBase64": False,
+                "events": ["MESSAGES_UPSERT"]
+            }
+        }
+        r = requests.post(evo_url, json=payload, headers=headers, timeout=10)
         r.raise_for_status()
-        return {"status": "Webhook sincronizado na Evolution API!"}
+        return {"status": f"Webhook Evolution configurado! Apontando para: {webhook_url}"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Falha ao configurar webhook: {str(e)}")
 
 @app.get("/api/users")
 async def list_users(current_user: dict = Depends(get_current_user)):
