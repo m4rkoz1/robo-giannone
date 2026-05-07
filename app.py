@@ -235,7 +235,7 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
     
     try:
         # 1. Busca lista de chats (grupos @g.us)
-        chats_url = f"{base}/api/{session}/chats?limit=50&sortBy=messageTimestamp&sortOrder=desc"
+        chats_url = f"{base}/api/{session}/chats?limit=50&sortBy=conversationTimestamp&sortOrder=desc"
         r = requests.get(chats_url, headers=h, timeout=15)
         if not r.ok:
             raise Exception(f"Erro ao listar chats: HTTP {r.status_code} - {r.text[:200]}")
