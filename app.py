@@ -298,6 +298,8 @@ async def listar_disponiveis(dia: str = None, current_user: dict = Depends(get_c
 LAST_WEBHOOK_TIME = "Nenhum evento detectado desde o último reinício."
 # Log de debug para webhooks (mantém os últimos 30 eventos)
 WEBHOOK_LOG = []
+# Log de processamento de mensagens (mantém os últimos 30)
+PROCESS_LOG = []
 
 # --------- ROTA DE WEBHOOK (EVOLUTION API / WAHA API) ---------
 @app.post("/webhook/evolution")
@@ -346,7 +348,7 @@ async def webhook_evolution(request: Request):
 # --------- ROTA DE DEBUG: LOG DE WEBHOOKS ---------
 @app.get("/api/webhook/log")
 async def get_webhook_log(current_user: dict = Depends(get_current_user)):
-    return {"last_hook": LAST_WEBHOOK_TIME, "log": list(reversed(WEBHOOK_LOG))}
+    return {"last_hook": LAST_WEBHOOK_TIME, "log": list(reversed(WEBHOOK_LOG)), "process_log": list(reversed(PROCESS_LOG))}
 
 def processar_mensagem_apagada(payload, is_waha):
     conn = get_db_connection()
@@ -498,12 +500,29 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         
     if not texto_original or not remote_jid: return
     
+    # Log de processamento para debug
+    log_entry = {
+        "hora": datetime.now(timezone(timedelta(hours=-3))).strftime('%H:%M:%S'),
+        "jid": remote_jid[:30],
+        "texto": (texto_original or "")[:80],
+        "motorista": motorista,
+        "etapa": "inicio",
+        "resultado": ""
+    }
+    
     # Se o admin ativou a IA (llm_api_key presente), a IA toma o controle da extração
     
     status_ia, placa_ia = analisar_mensagem_com_ia(texto_original, config)
     if config.get("llm_api_key"):
+        log_entry["ia_status"] = str(status_ia)
+        log_entry["ia_placa"] = str(placa_ia)
         # Usa totalmente a IA se estiver configurada.
-        if not status_ia: return # IA disse que não é mensagem de status
+        if not status_ia:
+            log_entry["etapa"] = "descartada_ia"
+            log_entry["resultado"] = "IA retornou status=null (msg irrelevante)"
+            PROCESS_LOG.append(log_entry)
+            if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
+            return # IA disse que não é mensagem de status
         status_veiculo = status_ia
         placa = placa_ia or ""
     else:
@@ -571,8 +590,16 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
                          (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id))
         
         conn.commit()
+        log_entry["etapa"] = "salvo"
+        log_entry["resultado"] = f"{'UPDATE' if existente else 'INSERT'} | {status_veiculo} | {placa} | {motorista}"
+        PROCESS_LOG.append(log_entry)
+        if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
     except Exception as e:
         print("Erro SQL", e)
+        log_entry["etapa"] = "erro_sql"
+        log_entry["resultado"] = str(e)[:80]
+        PROCESS_LOG.append(log_entry)
+        if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
     finally:
         conn.close()
 

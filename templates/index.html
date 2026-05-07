@@ -739,8 +739,30 @@
                         html += '</div>';
                     });
                     html += '</div>';
-                    content.innerHTML = html;
                 }
+                
+                // Seção: Log de Processamento
+                html += '<div style="margin-top:1rem; border-top:1px solid rgba(255,255,255,0.1); padding-top:0.8rem;">';
+                html += '<strong style="color:#c084fc;">📊 Pipeline de Processamento:</strong>';
+                if (!res.process_log || res.process_log.length === 0) {
+                    html += '<div style="color:#64748b; margin-top:0.3rem;">Nenhuma mensagem processada ainda.</div>';
+                } else {
+                    res.process_log.forEach(entry => {
+                        const corEtapa = entry.etapa === 'salvo' ? '#34d399' : 
+                                         entry.etapa === 'descartada_ia' ? '#fbbf24' : 
+                                         entry.etapa === 'erro_sql' ? '#ef4444' : '#94a3b8';
+                        html += `<div style="padding:0.4rem 0; border-bottom:1px solid rgba(255,255,255,0.04);">`;
+                        html += `<strong style="color:${corEtapa}">${entry.hora} [${entry.etapa}]</strong>`;
+                        html += ` | ${entry.motorista || '?'}`;
+                        if (entry.ia_status) html += ` | IA: ${entry.ia_status}/${entry.ia_placa || '?'}`;
+                        html += `<br><span style="color:#94a3b8">"${entry.texto}"</span>`;
+                        html += `<br><span style="color:${corEtapa}">${entry.resultado}</span>`;
+                        html += '</div>';
+                    });
+                }
+                html += '</div>';
+                
+                content.innerHTML = html;
             } catch(e) {
                 content.innerHTML = `<span style="color:#ef4444">❌ Erro ao carregar log: ${e.message}</span>`;
             }
