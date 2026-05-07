@@ -510,23 +510,26 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         "resultado": ""
     }
     
-    # Se o admin ativou a IA (llm_api_key presente), a IA toma o controle da extração
+    # ---- EXTRAÇÃO DE STATUS E PLACA ----
+    placa = ""
+    status_veiculo = ""
+    usou_ia = False
     
-    status_ia, placa_ia = analisar_mensagem_com_ia(texto_original, config)
+    # Tenta IA primeiro (se configurada)
     if config.get("llm_api_key"):
+        status_ia, placa_ia = analisar_mensagem_com_ia(texto_original, config)
         log_entry["ia_status"] = str(status_ia)
         log_entry["ia_placa"] = str(placa_ia)
-        # Usa totalmente a IA se estiver configurada.
-        if not status_ia:
-            log_entry["etapa"] = "descartada_ia"
-            log_entry["resultado"] = "IA retornou status=null (msg irrelevante)"
-            PROCESS_LOG.append(log_entry)
-            if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
-            return # IA disse que não é mensagem de status
-        status_veiculo = status_ia
-        placa = placa_ia or ""
-    else:
-        # ---- HEURÍSTICA LEGADA (SEM IA) ----
+        
+        if status_ia:
+            # IA conseguiu extrair com sucesso
+            status_veiculo = status_ia
+            placa = placa_ia or ""
+            usou_ia = True
+            log_entry["resultado"] = f"IA extraiu: {status_ia} / {placa_ia}"
+    
+    # Fallback para heurística (se IA não configurada OU se IA retornou null)
+    if not usou_ia:
         texto_lower = texto_original.lower()
         if "indisponivel" in texto_lower or "indisponível" in texto_lower:
             status_veiculo = "Indisponível"
@@ -534,9 +537,21 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
             status_veiculo = "Disponível"
         else:
             regex_disp = re.compile(config.get("palavra_chave", "dispon[ií]vel"), re.IGNORECASE)
-            if not regex_disp.search(texto_original): return
+            if not regex_disp.search(texto_original):
+                log_entry["etapa"] = "descartada_heuristica"
+                log_entry["resultado"] = "Palavra-chave não encontrada na mensagem"
+                PROCESS_LOG.append(log_entry)
+                if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
+                return
+        
+        if not status_veiculo:
+            status_veiculo = "Disponível"
+        
+        log_entry["resultado"] = f"Heurística: {status_veiculo}"
 
-        # 1. Busca padrão forte: 3 letras e 4 caracteres após, ignorando traços ou espaços e tolerando o virando 0
+    # ---- EXTRAÇÃO DE PLACA (se IA não encontrou) ----
+    if not placa:
+        # 1. Busca padrão forte: 3 letras e 4 caracteres após
         padrao_forte = re.compile(r"\b([A-Za-z]{3})[-\s]*([A-Za-z0-9]{4})\b")
         placas = padrao_forte.findall(texto_original)
         
