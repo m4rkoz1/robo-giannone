@@ -232,14 +232,26 @@
                                 <div class="tools-grid">
                                     <button type="button" onclick="syncWaha(this)" class="tool-btn">
                                         <span class="tool-icon">🔄</span>
-                                        <span class="tool-label">Puxar Histórico</span>
-                                        <span class="tool-desc">Importar mensagens passadas da WAHA</span>
+                                        <span class="tool-label">Puxar Histórico 24h</span>
+                                        <span class="tool-desc">Importar mensagens das últimas 24h dos grupos</span>
                                     </button>
                                     <button type="button" onclick="pingWaha(this)" class="tool-btn">
                                         <span class="tool-icon">📡</span>
                                         <span class="tool-label">Testar WAHA</span>
                                         <span class="tool-desc">Verificar conectividade da API</span>
                                     </button>
+                                    <button type="button" onclick="showWebhookLog()" class="tool-btn">
+                                        <span class="tool-icon">📋</span>
+                                        <span class="tool-label">Log de Webhooks</span>
+                                        <span class="tool-desc">Ver eventos recebidos (debug)</span>
+                                    </button>
+                                </div>
+                                <div id="webhook-log-area" style="display:none; margin-top:1rem;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                                        <strong style="font-size:0.85rem; color:var(--text-muted);">Últimos eventos recebidos:</strong>
+                                        <button onclick="document.getElementById('webhook-log-area').style.display='none'" class="btn outline small" style="padding:0.3rem 0.6rem; font-size:0.75rem;">Fechar</button>
+                                    </div>
+                                    <div id="webhook-log-content" style="max-height:300px; overflow-y:auto; background:rgba(0,0,0,0.3); border-radius:8px; padding:0.8rem; font-size:0.78rem; font-family:monospace; color:#94a3b8;"></div>
                                 </div>
                             </div>
 
@@ -699,6 +711,39 @@
                 loadVeiculos();
             } catch(e) { alert('❌ Erro: ' + e.message); }
             btn.querySelector('.tool-label').textContent = original;
+        }
+
+        async function showWebhookLog() {
+            const area = document.getElementById('webhook-log-area');
+            const content = document.getElementById('webhook-log-content');
+            area.style.display = 'block';
+            content.innerHTML = '<span style="color:#64748b">Carregando...</span>';
+            
+            try {
+                const res = await fetchAPI('/api/webhook/log');
+                if (!res.log || res.log.length === 0) {
+                    content.innerHTML = `<div style="color:#fbbf24">⚠️ Nenhum evento recebido desde o último reinício do servidor.</div>
+                    <div style="margin-top:0.5rem; color:#64748b">Último status: ${res.last_hook}</div>
+                    <div style="margin-top:0.5rem; color:#64748b">💡 Dica: Configure o Webhook no card "Conexão WAHA" e envie uma mensagem de teste no WhatsApp.</div>`;
+                } else {
+                    let html = `<div style="margin-bottom:0.5rem; color:#34d399">✅ ${res.log.length} eventos registrados. Último: ${res.last_hook}</div>`;
+                    html += '<div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:0.5rem;">';
+                    res.log.forEach((entry, i) => {
+                        const cor = entry.fromMe ? '#64748b' : '#e2e8f0';
+                        html += `<div style="padding:0.4rem 0; border-bottom:1px solid rgba(255,255,255,0.04); color:${cor}">`;
+                        html += `<strong>${entry.hora}</strong> | Evento: <span style="color:#60a5fa">${entry.evento}</span>`;
+                        if (entry.from) html += ` | De: ${entry.from}`;
+                        if (entry.remoteJid) html += ` | JID: ${entry.remoteJid}`;
+                        if (entry.fromMe) html += ' | <span style="color:#64748b">(próprio)</span>';
+                        if (entry.body_preview) html += `<br><span style="color:#94a3b8; font-style:italic">"${entry.body_preview}"</span>`;
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                    content.innerHTML = html;
+                }
+            } catch(e) {
+                content.innerHTML = `<span style="color:#ef4444">❌ Erro ao carregar log: ${e.message}</span>`;
+            }
         }
 
         async function syncWebhook(btn) {

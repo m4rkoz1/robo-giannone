@@ -225,21 +225,64 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
     if not config.get('evo_url') or not config.get('evo_instance'):
         raise HTTPException(status_code=400, detail="Configure a WAHA primeiro.")
     
+    base = config['evo_url'].rstrip('/')
+    session = config['evo_instance']
+    h = {"accept": "application/json"}
+    if config.get('evo_apikey'): h["X-Api-Key"] = config['evo_apikey']
+    
+    total_processadas = 0
+    erros = []
+    
     try:
-        url = f"{config['evo_url'].rstrip('/')}/api/messages?session={config['evo_instance']}&limit=200"
-        h = {"accept": "application/json"}
-        if config.get('evo_apikey'): h["X-Api-Key"] = config['evo_apikey']
-        r = requests.get(url, headers=h, timeout=20)
-        if r.ok:
-            msgs = r.json()
-            # WAHA pode retornar lista direta ou paginate em "data"
-            if isinstance(msgs, dict): msgs = msgs.get("data", [])
-            for m in msgs:
-                # Simula o payload de webhook WAHA
-                processar_mensagem_webhook({"event": "message", "payload": m}, is_sync=True)
-            return {"status": f"Histórico Sincronizado! ({len(msgs)} lidas)"}
-        else:
-            raise Exception(f"HTTP {r.status_code}: {r.text}")
+        # 1. Busca lista de chats (grupos @g.us)
+        chats_url = f"{base}/api/{session}/chats?limit=50&sortBy=messageTimestamp&sortOrder=desc"
+        r = requests.get(chats_url, headers=h, timeout=15)
+        if not r.ok:
+            raise Exception(f"Erro ao listar chats: HTTP {r.status_code} - {r.text[:200]}")
+        
+        chats = r.json()
+        if isinstance(chats, dict): chats = chats.get("data", [])
+        
+        # Filtra apenas grupos
+        grupo_chats = [c for c in chats if "@g.us" in str(c.get("id", ""))]
+        
+        # Timestamp de 24h atrás
+        agora = datetime.now(timezone(timedelta(hours=-3)))
+        limite_24h = int((agora - timedelta(hours=24)).timestamp())
+        
+        # 2. Para cada grupo, busca mensagens recentes
+        for chat in grupo_chats:
+            chat_id = chat.get("id", "")
+            if not chat_id: continue
+            
+            try:
+                msgs_url = f"{base}/api/{session}/chats/{chat_id}/messages?limit=100&sortOrder=desc"
+                r2 = requests.get(msgs_url, headers=h, timeout=15)
+                if not r2.ok: 
+                    erros.append(f"{chat_id}: HTTP {r2.status_code}")
+                    continue
+                
+                msgs = r2.json()
+                if isinstance(msgs, dict): msgs = msgs.get("data", [])
+                
+                for m in msgs:
+                    # Filtra apenas últimas 24h
+                    ts = m.get("timestamp", 0)
+                    if ts and ts < limite_24h: continue
+                    
+                    # Simula payload de webhook WAHA
+                    processar_mensagem_webhook({"event": "message", "payload": m}, is_sync=True)
+                    total_processadas += 1
+                    
+            except Exception as ex:
+                erros.append(f"{chat_id}: {str(ex)[:80]}")
+                continue
+        
+        resultado = f"Histórico sincronizado! {total_processadas} mensagens processadas de {len(grupo_chats)} grupos."
+        if erros:
+            resultado += f" ({len(erros)} erros em chats específicos)"
+        return {"status": resultado}
+        
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -253,6 +296,8 @@ async def listar_disponiveis(dia: str = None, current_user: dict = Depends(get_c
     return [dict(v) for v in veiculos]
 
 LAST_WEBHOOK_TIME = "Nenhum evento detectado desde o último reinício."
+# Log de debug para webhooks (mantém os últimos 30 eventos)
+WEBHOOK_LOG = []
 
 # --------- ROTA DE WEBHOOK (EVOLUTION API / WAHA API) ---------
 @app.post("/webhook/evolution")
@@ -261,7 +306,31 @@ async def webhook_evolution(request: Request):
     try:
         payload = await request.json()
         evento = payload.get("event", "desconhecido")
-        LAST_WEBHOOK_TIME = f"Recebido hoje às {datetime.now(timezone(timedelta(hours=-3))).strftime('%H:%M:%S')} (Tipo: {evento})"
+        agora_str = datetime.now(timezone(timedelta(hours=-3))).strftime('%H:%M:%S')
+        LAST_WEBHOOK_TIME = f"Recebido hoje às {agora_str} (Tipo: {evento})"
+        
+        # Salva no log de debug (máximo 30 entradas)
+        log_entry = {
+            "hora": agora_str,
+            "evento": evento,
+            "tem_payload": "payload" in payload,
+            "tem_data": "data" in payload,
+            "keys": list(payload.keys()),
+        }
+        # Tenta extrair info básica da mensagem
+        if "payload" in payload:
+            p = payload["payload"]
+            log_entry["from"] = p.get("from", "")
+            log_entry["body_preview"] = (p.get("body", "") or "")[:80]
+            log_entry["fromMe"] = p.get("fromMe", None)
+        elif "data" in payload:
+            d = payload["data"]
+            log_entry["remoteJid"] = d.get("key", {}).get("remoteJid", "")
+            msg_content = d.get("message", {})
+            log_entry["body_preview"] = (msg_content.get("conversation", "") or msg_content.get("extendedTextMessage", {}).get("text", ""))[:80]
+        
+        WEBHOOK_LOG.append(log_entry)
+        if len(WEBHOOK_LOG) > 30: WEBHOOK_LOG.pop(0)
         
         # Aceita Evolution (messages.upsert) e WAHA (message / message.any)
         if evento == "messages.upsert" or str(evento).startswith("message"):
@@ -273,6 +342,11 @@ async def webhook_evolution(request: Request):
         return {"status": "ok"}
     except Exception as e:
         return {"status": "erro", "detalhe": str(e)}
+
+# --------- ROTA DE DEBUG: LOG DE WEBHOOKS ---------
+@app.get("/api/webhook/log")
+async def get_webhook_log(current_user: dict = Depends(get_current_user)):
+    return {"last_hook": LAST_WEBHOOK_TIME, "log": list(reversed(WEBHOOK_LOG))}
 
 def processar_mensagem_apagada(payload, is_waha):
     conn = get_db_connection()
