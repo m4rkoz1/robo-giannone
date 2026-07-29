@@ -575,17 +575,17 @@ def analisar_mensagem_com_ia(texto, config):
     model = (config.get("llm_model") or "").strip() or "meta/llama-3.3-70b-instruct"
     
     url = get_llm_url(config)
-    prompt = f"""Você extrai dados de mensagens de motoristas de caminhão.
-O motorista pode informar sobre um ou mais veículos, placas e status ("disponível" ou "indisponível").
-Responda APENAS com um array JSON válido (sem markdown de formatação) de objetos com as chaves:
-"status": "Disponível" OU "Indisponível" (caso a mensagem não seja sobre disponibilidade, coloque null).
-"placa": a placa com 7 digitos limpos, ex: "ABC1234" ou "PZH0000". Caso a pessoa mande só 3 letras isoladas parecendo ser a placa (ex: "estou disp PZH"), coloque as 3 letras na placa. Se não houver placa, retorne null.
-
-Exemplo de resposta para 2 veículos:
-[{"status": "Disponível", "placa": "ABC1234"}, {"status": "Indisponível", "placa": "XYZ9876"}]
-
-Mensagem do Motorista: "{texto}"
-JSON:"""
+    prompt = (
+        "Você extrai dados de mensagens de motoristas de caminhão.\n"
+        "O motorista pode informar sobre um ou mais veículos, placas e status (\"disponível\" ou \"indisponível\").\n"
+        "Responda APENAS com um array JSON válido (sem markdown de formatação) de objetos com as chaves:\n"
+        "\"status\": \"Disponível\" OU \"Indisponível\" (caso a mensagem não seja sobre disponibilidade, coloque null).\n"
+        "\"placa\": a placa com 7 digitos limpos, ex: \"ABC1234\" ou \"PZH0000\". Caso a pessoa mande só 3 letras isoladas parecendo ser a placa (ex: \"estou disp PZH\"), coloque as 3 letras na placa. Se não houver placa, retorne null.\n\n"
+        "Exemplo de resposta para 2 veículos:\n"
+        "[{\"status\": \"Disponível\", \"placa\": \"ABC1234\"}, {\"status\": \"Indisponível\", \"placa\": \"XYZ9876\"}]\n\n"
+        f"Mensagem do Motorista: \"{texto}\"\n"
+        "JSON:"
+    )
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -632,7 +632,14 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         data = payload.get("payload", {})
         if data.get("fromMe", False): return
         remote_jid = data.get("from", "")
-        texto_original = data.get("body", "")
+        texto_original = (
+            data.get("body") or 
+            data.get("caption") or 
+            data.get("_data", {}).get("caption") or 
+            data.get("_data", {}).get("body") or 
+            data.get("text") or 
+            ""
+        )
         timestamp_msg = data.get("timestamp")
         
         telefone_bruto = data.get("author") or data.get("participant") or remote_jid
@@ -654,7 +661,14 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
                 conn.commit()
             return
             
-        texto_original = message_content.get("conversation", message_content.get("extendedTextMessage", {}).get("text", ""))
+        texto_original = (
+            message_content.get("conversation") or 
+            message_content.get("extendedTextMessage", {}).get("text") or 
+            message_content.get("imageMessage", {}).get("caption") or 
+            message_content.get("documentMessage", {}).get("caption") or 
+            message_content.get("videoMessage", {}).get("caption") or 
+            ""
+        )
         
         telefone_bruto = data.get("participant") or data.get("key", {}).get("participant", "") or remote_jid
         if "sender" in data:
@@ -684,13 +698,13 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         if itens_ia:
             for item in itens_ia:
                 st = item.get("status")
-                pl = item.get("placa") or ""
-                if st:
+                pl = (item.get("placa") or "").strip().upper()
+                if st and pl:  # Apenas aceita item da IA se tiver STATUS E PLACA VÁLIDA
                     itens_extraidos.append({"status": st, "placa": pl})
             if itens_extraidos:
                 log_entry["resultado"] = f"IA extraiu {len(itens_extraidos)} veículo(s)"
 
-    # Fallback para heurística (se IA não configurada OU se IA não retornou status válido)
+    # Fallback para heurística (se IA não configurada OU se IA não retornou placa válida)
     if not itens_extraidos:
         status_heuristico = ""
         texto_lower = texto_original.lower()
@@ -716,7 +730,7 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         placas = padrao_forte.findall(texto_original)
         
         for p_letra, p_num in placas:
-            p_num_corrigido = p_num.replace('o', '0').replace('O', '0')
+            p_num_corrigido = p_num.replace('o', '0').replace('O', '0').replace('i', '1').replace('I', '1').replace('l', '1').replace('L', '1')
             if any(char.isdigit() for char in p_num_corrigido):
                 placas_encontradas.append((p_letra + p_num_corrigido).upper())
                 

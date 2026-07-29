@@ -451,7 +451,8 @@
         let token = localStorage.getItem('access_token');
         let role = localStorage.getItem('role');
 
-        document.getElementById('filter-date').valueAsDate = new Date();
+        const localDateStr = new Date().toLocaleDateString('sv-SE');
+        document.getElementById('filter-date').value = localDateStr;
 
         // Inicialização
         if (token) {
