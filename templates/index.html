@@ -351,6 +351,11 @@
                                         <span class="tool-label">Puxar Histórico 24h</span>
                                         <span class="tool-desc">Importar mensagens das últimas 24h dos grupos</span>
                                     </button>
+                                    <button type="button" onclick="syncGruposWaha(this)" class="tool-btn">
+                                        <span class="tool-icon">👥</span>
+                                        <span class="tool-label">Atualizar Grupos</span>
+                                        <span class="tool-desc">Buscar nomes reais dos grupos na WAHA</span>
+                                    </button>
                                     <button type="button" onclick="pingWaha(this)" class="tool-btn">
                                         <span class="tool-icon">📡</span>
                                         <span class="tool-label">Testar WAHA</span>
@@ -963,6 +968,18 @@
                 loadVeiculos();
             } catch(e) { alert('❌ Erro: ' + e.message); }
             btn.querySelector('.tool-label').textContent = original;
+        }
+
+        async function syncGruposWaha(btn) {
+            const labelEl = btn.querySelector('.tool-label');
+            const original = labelEl ? labelEl.textContent : btn.textContent;
+            if (labelEl) labelEl.textContent = 'Buscando...';
+            try {
+                const res = await fetchAPI('/api/waha/sync_grupos', {method: 'POST'});
+                alert(`✅ Sucesso! ${res.grupos_atualizados || 0} registro(s) tiveram seus grupos atualizados com o nome real.`);
+                loadVeiculos();
+            } catch(e) { alert('❌ Erro: ' + e.message); }
+            if (labelEl) labelEl.textContent = original;
         }
 
         async function showWebhookLog() {

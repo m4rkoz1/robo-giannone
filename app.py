@@ -266,7 +266,10 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
                 sufixo_4 = chat_id.split('@')[0][-4:]
                 try:
                     conn_sync = get_db_connection()
-                    conn_sync.execute("UPDATE veiculos SET grupo = ? WHERE grupo = ?", (nome_limpo, f"Grupo ({sufixo_4})"))
+                    conn_sync.execute(
+                        "UPDATE veiculos SET grupo = ? WHERE grupo = ? OR grupo LIKE ?", 
+                        (nome_limpo, f"Grupo ({sufixo_4})", f"%({sufixo_4})%")
+                    )
                     conn_sync.commit()
                     conn_sync.close()
                 except Exception: pass
@@ -393,7 +396,7 @@ def obter_nome_grupo(jid: str, config: dict, payload: dict = None) -> str:
     sufixo_4 = jid.split('@')[0][-4:]
     nome_padrao = f"Grupo ({sufixo_4})"
 
-    # 1. Tenta extrair o nome do grupo DIRETAMENTE do payload do webhook (sem requisição extra HTTP)
+    # 1. Tenta extrair o nome do grupo DIRETAMENTE do payload do webhook
     if payload and isinstance(payload, dict):
         p_data = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload.get("data", {})
         if not isinstance(p_data, dict): p_data = {}
@@ -403,15 +406,19 @@ def obter_nome_grupo(jid: str, config: dict, payload: dict = None) -> str:
             p_data.get("_data", {}).get("chat", {}).get("name") or
             payload.get("chat", {}).get("name") or
             p_data.get("chat", {}).get("name") or
+            payload.get("_data", {}).get("name") or
+            p_data.get("_data", {}).get("name") or
             payload.get("groupInfo", {}).get("subject") or
             p_data.get("groupInfo", {}).get("subject") or
             payload.get("groupMetadata", {}).get("subject") or
             p_data.get("groupMetadata", {}).get("subject") or
             payload.get("group", {}).get("name") or
-            p_data.get("group", {}).get("name")
+            p_data.get("group", {}).get("name") or
+            payload.get("name") or
+            p_data.get("name")
         )
         
-        if nome_payload and isinstance(nome_payload, str) and nome_payload.strip():
+        if nome_payload and isinstance(nome_payload, str) and nome_payload.strip() and not nome_payload.endswith("@g.us"):
             nome_limpo = nome_payload.strip()
             CACHE_GRUPOS[jid] = nome_limpo
             try:
@@ -422,7 +429,7 @@ def obter_nome_grupo(jid: str, config: dict, payload: dict = None) -> str:
             except Exception: pass
             return nome_limpo
 
-    # 2. Busca via API HTTP (WAHA / Evolution)
+    # 2. Busca via API HTTP da WAHA (/api/{session}/chats/{jid})
     if not config.get('evo_url') or not config.get('evo_instance'):
         return nome_padrao
         
@@ -435,10 +442,11 @@ def obter_nome_grupo(jid: str, config: dict, payload: dict = None) -> str:
         headers_waha["X-Api-Key"] = api_key
         headers_waha["apikey"] = api_key
 
+    # Endpoints oficiais da documentação WAHA:
     urls = [
-        f"{base_url}/api/groups/{jid}?session={session}",
         f"{base_url}/api/{session}/chats/{jid}",
         f"{base_url}/api/chats/{jid}?session={session}",
+        f"{base_url}/api/groups/{jid}?session={session}",
         f"{base_url}/group/findGroupInfos/{session}?groupJid={jid}"
     ]
     
@@ -449,7 +457,7 @@ def obter_nome_grupo(jid: str, config: dict, payload: dict = None) -> str:
                 data = r.json()
                 if isinstance(data, dict):
                     nome = data.get('name') or data.get('subject') or data.get('topic')
-                    if nome and isinstance(nome, str) and nome.strip():
+                    if nome and isinstance(nome, str) and nome.strip() and not nome.endswith("@g.us"):
                         nome_limpo = nome.strip()
                         CACHE_GRUPOS[jid] = nome_limpo
                         try:
@@ -463,6 +471,61 @@ def obter_nome_grupo(jid: str, config: dict, payload: dict = None) -> str:
             pass
 
     return nome_padrao
+
+@app.post("/api/waha/sync_grupos")
+async def sync_grupos_waha(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin": raise HTTPException(status_code=403)
+    conn = get_db_connection()
+    config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
+    conn.close()
+    
+    if not config.get('evo_url') or not config.get('evo_instance'):
+        raise HTTPException(status_code=400, detail="WAHA não configurada.")
+        
+    base_url = config['evo_url'].rstrip('/')
+    session = config['evo_instance']
+    api_key = (config.get('evo_apikey') or "").strip()
+    
+    headers = {"accept": "application/json"}
+    if api_key:
+        headers["X-Api-Key"] = api_key
+        headers["apikey"] = api_key
+        
+    urls = [
+        f"{base_url}/api/{session}/chats?limit=100",
+        f"{base_url}/api/chats?session={session}&limit=100"
+    ]
+    
+    atualizados = 0
+    conn = get_db_connection()
+    try:
+        for u in urls:
+            try:
+                r = requests.get(u, headers=headers, timeout=8)
+                if r.ok:
+                    chats = r.json()
+                    if isinstance(chats, dict): chats = chats.get("data", [])
+                    if isinstance(chats, list):
+                        for c in chats:
+                            jid = c.get("id", "")
+                            nome = c.get("name") or c.get("subject")
+                            if jid and "@g.us" in jid and nome and not nome.endswith("@g.us"):
+                                nome_limpo = nome.strip()
+                                CACHE_GRUPOS[jid] = nome_limpo
+                                sufixo = jid.split('@')[0][-4:]
+                                cursor = conn.execute(
+                                    "UPDATE veiculos SET grupo = ? WHERE grupo = ? OR grupo LIKE ?", 
+                                    (nome_limpo, f"Grupo ({sufixo})", f"%({sufixo})%")
+                                )
+                                atualizados += cursor.rowcount
+                        conn.commit()
+                        break
+            except Exception as ex:
+                print("Erro ao atualizar grupos WAHA:", ex)
+    finally:
+        conn.close()
+        
+    return {"status": "ok", "grupos_atualizados": atualizados}
 
 def enviar_reposta(jid, texto, config):
     if not config.get('evo_url') or not config.get('evo_instance'):
