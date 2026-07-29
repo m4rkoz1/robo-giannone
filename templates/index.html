@@ -41,6 +41,7 @@
                 </div>
                 <ul class="nav-links">
                     <li><button onclick="switchTab('lista')" class="nav-btn active">📑 Lista Diária</button></li>
+                    <li id="nav-relatorios"><button onclick="switchTab('relatorios')" class="nav-btn">📊 Relatórios</button></li>
                     <li id="nav-chat"><button onclick="switchTab('chat')" class="nav-btn">💬 Assistente IA</button></li>
                     <li id="nav-configs"><button onclick="switchTab('configs')" class="nav-btn">⚙️ Configurações</button></li>
                     <li id="nav-users"><button onclick="switchTab('users')" class="nav-btn">👥 Usuários</button></li>
@@ -75,6 +76,121 @@
                         </div>
                         <div class="groups-container mt-4" id="veiculos-grid">
                             <!-- JS Renderiza Cards por Grupo -->
+                        </div>
+                    </section>
+
+                    <!-- ============================================ -->
+                    <!--       TAB RELATÓRIOS GERENCIAIS             -->
+                    <!-- ============================================ -->
+                    <section id="tab-relatorios" class="tab-content hidden">
+                        <!-- Toolbar de Filtros -->
+                        <div class="filters glass-card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                                <label style="font-weight:600; color:#e2e8f0">Período:</label>
+                                <select id="rel-periodo" onchange="onRelatorioPeriodoChange()" style="padding: 0.5rem 0.8rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;">
+                                    <option value="semana">Esta Semana</option>
+                                    <option value="mes" selected>Este Mês</option>
+                                    <option value="30dias">Últimos 30 Dias</option>
+                                    <option value="hoje">Hoje</option>
+                                    <option value="custom">Personalizado</option>
+                                </select>
+                                <div id="rel-datas-custom" style="display: none; align-items: center; gap: 0.5rem;">
+                                    <input type="date" id="rel-data-inicio" style="padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: white;">
+                                    <span style="color:#94a3b8">até</span>
+                                    <input type="date" id="rel-data-fim" style="padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: white;">
+                                </div>
+                                <button onclick="loadRelatorios()" class="btn secondary small">🔍 Filtrar</button>
+                            </div>
+                            <div>
+                                <button onclick="exportarRelatorioCSV()" class="btn primary small" style="background: linear-gradient(135deg, #10b981, #059669);">📥 Exportar CSV (Excel)</button>
+                            </div>
+                        </div>
+
+                        <!-- Cards de Indicadores Gerenciais -->
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                            <div class="glass-card" style="padding: 1.2rem; display:flex; align-items:center; gap:1rem;">
+                                <div style="font-size:2.2rem; background:rgba(245,158,11,0.15); width:54px; height:54px; border-radius:12px; display:flex; align-items:center; justify-content:center;">🏆</div>
+                                <div>
+                                    <span style="font-size:0.8rem; color:#94a3b8; text-transform:uppercase; font-weight:600">Mais Disponível</span>
+                                    <h3 id="rel-card-top-veiculo" style="margin:0.2rem 0 0 0; color:#fbbf24; font-size:1.4rem">---</h3>
+                                    <span id="rel-card-top-dias" style="font-size:0.75rem; color:#64748b">0 dias no período</span>
+                                </div>
+                            </div>
+                            <div class="glass-card" style="padding: 1.2rem; display:flex; align-items:center; gap:1rem;">
+                                <div style="font-size:2.2rem; background:rgba(16,185,129,0.15); width:54px; height:54px; border-radius:12px; display:flex; align-items:center; justify-content:center;">🟢</div>
+                                <div>
+                                    <span style="font-size:0.8rem; color:#94a3b8; text-transform:uppercase; font-weight:600">Taxa Disponibilidade</span>
+                                    <h3 id="rel-card-taxa" style="margin:0.2rem 0 0 0; color:#34d399; font-size:1.4rem">0%</h3>
+                                    <span id="rel-card-disponiveis-cnt" style="font-size:0.75rem; color:#64748b">0 de 0 registros</span>
+                                </div>
+                            </div>
+                            <div class="glass-card" style="padding: 1.2rem; display:flex; align-items:center; gap:1rem;">
+                                <div style="font-size:2.2rem; background:rgba(99,102,241,0.15); width:54px; height:54px; border-radius:12px; display:flex; align-items:center; justify-content:center;">📊</div>
+                                <div>
+                                    <span style="font-size:0.8rem; color:#94a3b8; text-transform:uppercase; font-weight:600">Total de Operações</span>
+                                    <h3 id="rel-card-total-ops" style="margin:0.2rem 0 0 0; color:#818cf8; font-size:1.4rem">0</h3>
+                                    <span id="rel-card-placas-unicas" style="font-size:0.75rem; color:#64748b">0 placas distintas</span>
+                                </div>
+                            </div>
+                            <div class="glass-card" style="padding: 1.2rem; display:flex; align-items:center; gap:1rem;">
+                                <div style="font-size:2.2rem; background:rgba(168,85,247,0.15); width:54px; height:54px; border-radius:12px; display:flex; align-items:center; justify-content:center;">👥</div>
+                                <div>
+                                    <span style="font-size:0.8rem; color:#94a3b8; text-transform:uppercase; font-weight:600">Motorista Mais Ativo</span>
+                                    <h3 id="rel-card-top-motorista" style="margin:0.2rem 0 0 0; color:#c084fc; font-size:1.2rem; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;">---</h3>
+                                    <span style="font-size:0.75rem; color:#64748b">maior frequência</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tabela Ranking de Veículos Mais Disponíveis -->
+                        <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+                            <h3 style="margin-top:0; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; color:#f8fafc">
+                                <span>🏆</span> Ranking de Frequência de Disponibilidade no Período
+                            </h3>
+                            <div style="overflow-x: auto;">
+                                <table style="width:100%; border-collapse:collapse; text-align:left; font-size:0.9rem;">
+                                    <thead>
+                                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); color:#94a3b8; font-size:0.8rem; text-transform:uppercase;">
+                                            <th style="padding:0.6rem">Posição</th>
+                                            <th style="padding:0.6rem">Placa</th>
+                                            <th style="padding:0.6rem">Dias Disponível</th>
+                                            <th style="padding:0.6rem">Frequência</th>
+                                            <th style="padding:0.6rem">Motorista(s)</th>
+                                            <th style="padding:0.6rem">Última Data</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="rel-ranking-tbody">
+                                        <tr><td colspan="6" style="padding:1rem; text-align:center; color:#64748b">Carregando dados...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Tabela de Histórico Detalhado do Período -->
+                        <div class="glass-card" style="padding: 1.5rem;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+                                <h3 style="margin:0; display:flex; align-items:center; gap:0.5rem; color:#f8fafc">
+                                    <span>📋</span> Histórico Detalhado do Período
+                                </h3>
+                                <input type="text" id="rel-filter-search" onkeyup="filterRelatorioTabela()" placeholder="🔎 Filtrar placa, motorista..." style="padding:0.4rem 0.8rem; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:white; font-size:0.85rem; width:220px;">
+                            </div>
+                            <div style="overflow-x: auto; max-height: 400px;">
+                                <table style="width:100%; border-collapse:collapse; text-align:left; font-size:0.85rem;">
+                                    <thead style="position:sticky; top:0; background:#0f172a; z-index:1;">
+                                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); color:#94a3b8; font-size:0.75rem; text-transform:uppercase;">
+                                            <th style="padding:0.6rem">Data / Hora</th>
+                                            <th style="padding:0.6rem">Grupo</th>
+                                            <th style="padding:0.6rem">Motorista</th>
+                                            <th style="padding:0.6rem">Placa</th>
+                                            <th style="padding:0.6rem">Status</th>
+                                            <th style="padding:0.6rem">Mensagem Original</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="rel-detalhado-tbody">
+                                        <tr><td colspan="6" style="padding:1rem; text-align:center; color:#64748b">Carregando dados...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </section>
 
@@ -436,6 +552,10 @@
             
             switch(tabId) {
                 case 'lista': document.getElementById('page-title').textContent = 'Lista de Veículos Disponíveis'; break;
+                case 'relatorios': 
+                    document.getElementById('page-title').textContent = 'Relatórios Gerenciais'; 
+                    loadRelatorios();
+                    break;
                 case 'chat': document.getElementById('page-title').textContent = 'Assistente Inteligente'; break;
                 case 'configs': 
                     document.getElementById('page-title').textContent = 'Centro de Controle'; 
@@ -443,6 +563,120 @@
                     break;
                 case 'users': document.getElementById('page-title').textContent = 'Gerenciamento de Painel'; break;
             }
+        }
+
+        // ===================== RELATÓRIOS GERENCIAIS =====================
+        function onRelatorioPeriodoChange() {
+            const val = document.getElementById('rel-periodo').value;
+            const customArea = document.getElementById('rel-datas-custom');
+            if (val === 'custom') {
+                customArea.style.display = 'inline-flex';
+            } else {
+                customArea.style.display = 'none';
+            }
+            loadRelatorios();
+        }
+
+        async function loadRelatorios() {
+            const periodo = document.getElementById('rel-periodo').value;
+            const ini = document.getElementById('rel-data-inicio').value;
+            const fim = document.getElementById('rel-data-fim').value;
+
+            let url = `/api/relatorios/resumo?periodo=${periodo}`;
+            if (periodo === 'custom' && ini && fim) {
+                url += `&data_inicio=${ini}&data_fim=${fim}`;
+            }
+
+            try {
+                const data = await fetchAPI(url);
+                
+                // Atualiza Cards
+                const ind = data.indicadores || {};
+                document.getElementById('rel-card-top-veiculo').textContent = ind.top_veiculo || 'Nenhum';
+                document.getElementById('rel-card-top-dias').textContent = `${ind.top_veiculo_dias || 0} dias no período`;
+                document.getElementById('rel-card-taxa').textContent = `${ind.taxa_disponibilidade || 0}%`;
+                document.getElementById('rel-card-disponiveis-cnt').textContent = `${ind.total_disponiveis || 0} de ${ind.total_registros || 0} registros`;
+                document.getElementById('rel-card-total-ops').textContent = ind.total_registros || 0;
+                document.getElementById('rel-card-placas-unicas').textContent = `${ind.total_placas_unicas || 0} placas distintas`;
+                document.getElementById('rel-card-top-motorista').textContent = ind.top_motorista || 'Nenhum';
+
+                // Atualiza Tabela Ranking
+                const rankingBody = document.getElementById('rel-ranking-tbody');
+                const ranking = data.ranking_veiculos || [];
+                if (ranking.length === 0) {
+                    rankingBody.innerHTML = '<tr><td colspan="6" style="padding:1rem; text-align:center; color:#64748b">Nenhum veículo registrado neste período.</td></tr>';
+                } else {
+                    const maxDias = ranking[0].disponivel_cnt || 1;
+                    rankingBody.innerHTML = ranking.map((r, index) => {
+                        const pct = Math.round((r.disponivel_cnt / maxDias) * 100);
+                        const medal = index === 0 ? '🥇 ' : index === 1 ? '🥈 ' : index === 2 ? '🥉 ' : `#${index+1} `;
+                        return `
+                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                                <td style="padding:0.6rem; font-weight:bold; color:${index < 3 ? '#fbbf24' : '#94a3b8'}">${medal}</td>
+                                <td style="padding:0.6rem;"><span class="badge-placa">${r.placa}</span></td>
+                                <td style="padding:0.6rem; font-weight:600; color:#34d399">${r.disponivel_cnt} dia(s)</td>
+                                <td style="padding:0.6rem; width:150px;">
+                                    <div style="background:rgba(255,255,255,0.08); border-radius:4px; height:8px; overflow:hidden;">
+                                        <div style="width:${pct}%; background:linear-gradient(90deg, #10b981, #34d399); height:100%;"></div>
+                                    </div>
+                                </td>
+                                <td style="padding:0.6rem; color:#cbd5e1; font-size:0.8rem">${r.motoristas || '-'}</td>
+                                <td style="padding:0.6rem; color:#64748b; font-size:0.8rem">${r.ultima_data || '-'}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+                // Atualiza Tabela Detalhada
+                let detUrl = `/api/relatorios/detalhado?periodo=${periodo}`;
+                if (periodo === 'custom' && ini && fim) {
+                    detUrl += `&data_inicio=${ini}&data_fim=${fim}`;
+                }
+                const detalhado = await fetchAPI(detUrl);
+                const detBody = document.getElementById('rel-detalhado-tbody');
+                if (detalhado.length === 0) {
+                    detBody.innerHTML = '<tr><td colspan="6" style="padding:1rem; text-align:center; color:#64748b">Sem histórico no período.</td></tr>';
+                } else {
+                    detBody.innerHTML = detalhado.map(d => {
+                        const statusBadge = d.status === 'Indisponível' 
+                            ? '<span class="badge-status indisp" style="padding:0.1rem 0.4rem; font-size:0.75rem">🔴 Indisponível</span>'
+                            : '<span class="badge-status disp" style="padding:0.1rem 0.4rem; font-size:0.75rem">🟢 Disponível</span>';
+                        return `
+                            <tr class="rel-det-row" style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                                <td style="padding:0.5rem 0.6rem; color:#94a3b8">${d.data_operacao} <span style="font-size:0.75rem; color:#64748b">${d.horario_mensagem}</span></td>
+                                <td style="padding:0.5rem 0.6rem; font-weight:500; color:#e2e8f0">${d.grupo}</td>
+                                <td style="padding:0.5rem 0.6rem; color:#cbd5e1">${d.motorista} <br><span style="font-size:0.75rem; color:#64748b">${d.telefone}</span></td>
+                                <td style="padding:0.5rem 0.6rem;"><span class="badge-placa" style="font-size:0.75rem">${d.placa}</span></td>
+                                <td style="padding:0.5rem 0.6rem;">${statusBadge}</td>
+                                <td style="padding:0.5rem 0.6rem; color:#64748b; font-style:italic; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${d.mensagem_original}">${d.mensagem_original}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+            } catch(e) {
+                console.error("Erro ao carregar relatórios:", e);
+            }
+        }
+
+        function filterRelatorioTabela() {
+            const term = document.getElementById('rel-filter-search').value.toLowerCase();
+            document.querySelectorAll('.rel-det-row').forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(term) ? '' : 'none';
+            });
+        }
+
+        function exportarRelatorioCSV() {
+            const periodo = document.getElementById('rel-periodo').value;
+            const ini = document.getElementById('rel-data-inicio').value;
+            const fim = document.getElementById('rel-data-fim').value;
+
+            let url = `/api/relatorios/exportar?periodo=${periodo}`;
+            if (periodo === 'custom' && ini && fim) {
+                url += `&data_inicio=${ini}&data_fim=${fim}`;
+            }
+            window.open(url, '_blank');
         }
 
         // API Calls with Auth Header

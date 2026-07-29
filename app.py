@@ -1,7 +1,10 @@
 import sqlite3
 import re
+import csv
+import io
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -390,27 +393,52 @@ def obter_nome_grupo(jid, config):
     return f"Grupo ({jid.split('@')[0][-4:]})"
 
 def enviar_reposta(jid, texto, config):
-    if not config.get('evo_url') or not config.get('evo_instance'): return
+    if not config.get('evo_url') or not config.get('evo_instance'):
+        print("Auto-resposta não enviada: WAHA/Evolution não configurados.")
+        return False
     
     url = config['evo_url'].rstrip('/')
     session = config['evo_instance']
-    key = config.get('evo_apikey')
+    key = (config.get('evo_apikey') or "").strip()
     
-    # Tenta disparar resposta para WAHA ou fallback pra Evolution
+    chat_id = jid
+    if "@" not in chat_id:
+        chat_id = f"{chat_id}@c.us"
+    
+    # 1. Tenta disparar resposta para WAHA API (POST /api/sendText)
     try:
         req_url = f"{url}/api/sendText"
         headers = {"accept": "application/json", "Content-Type": "application/json"}
-        if key: headers["X-Api-Key"] = key
-        payload = {"session": session, "chatId": jid, "text": texto}
-        r = requests.post(req_url, headers=headers, json=payload, timeout=5)
-        # Se 404, provável que seja url da Evolution API original
-        if r.status_code == 404:
-            req_url = f"{url}/message/sendText/{session}"
-            headers = {"apikey": key, "Content-Type": "application/json"}
-            payload = {"number": jid, "text": texto}
-            requests.post(req_url, headers=headers, json=payload, timeout=5)
-    except:
-        pass
+        if key:
+            headers["X-Api-Key"] = key
+            headers["apikey"] = key
+        payload = {"session": session, "chatId": chat_id, "text": texto}
+        r = requests.post(req_url, headers=headers, json=payload, timeout=6)
+        if r.ok:
+            print(f"Auto-resposta WAHA enviada com sucesso para {chat_id}")
+            return True
+        else:
+            print(f"WAHA sendText HTTP {r.status_code}: {r.text[:150]}")
+    except Exception as e:
+        print("Erro WAHA sendText:", e)
+
+    # 2. Fallback para Evolution API (POST /message/sendText/{session})
+    try:
+        req_url = f"{url}/message/sendText/{session}"
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["apikey"] = key
+        payload = {"number": jid, "text": texto}
+        r = requests.post(req_url, headers=headers, json=payload, timeout=6)
+        if r.ok:
+            print(f"Auto-resposta Evolution enviada com sucesso para {jid}")
+            return True
+        else:
+            print(f"Evolution sendText HTTP {r.status_code}: {r.text[:150]}")
+    except Exception as e:
+        print("Erro Evolution sendText:", e)
+
+    return False
 
 import json
 
@@ -471,15 +499,18 @@ def get_llm_url(config):
 
 def analisar_mensagem_com_ia(texto, config):
     api_key = (config.get("llm_api_key") or "").strip()
-    if not api_key: return None, None
+    if not api_key: return []
     model = (config.get("llm_model") or "").strip() or "meta/llama-3.3-70b-instruct"
     
     url = get_llm_url(config)
     prompt = f"""Você extrai dados de mensagens de motoristas de caminhão.
-O motorista irá informar sobre o veículo, placa ou seu status ("disponível" ou "indisponível").
-Responda APENAS com um objeto JSON válido (sem markdown de formatação) com as chaves:
+O motorista pode informar sobre um ou mais veículos, placas e status ("disponível" ou "indisponível").
+Responda APENAS com um array JSON válido (sem markdown de formatação) de objetos com as chaves:
 "status": "Disponível" OU "Indisponível" (caso a mensagem não seja sobre disponibilidade, coloque null).
 "placa": a placa com 7 digitos limpos, ex: "ABC1234" ou "PZH0000". Caso a pessoa mande só 3 letras isoladas parecendo ser a placa (ex: "estou disp PZH"), coloque as 3 letras na placa. Se não houver placa, retorne null.
+
+Exemplo de resposta para 2 veículos:
+[{"status": "Disponível", "placa": "ABC1234"}, {"status": "Indisponível", "placa": "XYZ9876"}]
 
 Mensagem do Motorista: "{texto}"
 JSON:"""
@@ -493,6 +524,7 @@ JSON:"""
         "temperature": 0.1,
         "stream": False
     }
+    resultados = []
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=12)
         if r.ok:
@@ -500,15 +532,22 @@ JSON:"""
             if txt.startswith("```json"): txt = txt[7:-3].strip()
             if txt.startswith("```"): txt = txt[3:-3].strip()
             js = json.loads(txt)
-            st = js.get("status")
-            pl = js.get("placa")
-            if isinstance(pl, str): pl = pl.strip().upper().replace(" ", "").replace("-", "")
-            return st, pl
+            if isinstance(js, dict):
+                js = [js]
+            if isinstance(js, list):
+                for item in js:
+                    if isinstance(item, dict):
+                        st = item.get("status")
+                        pl = item.get("placa")
+                        if isinstance(pl, str): pl = pl.strip().upper().replace(" ", "").replace("-", "")
+                        if st or pl:
+                            resultados.append({"status": st, "placa": pl})
+            return resultados
         else:
             print(f"Erro na IA HTTP {r.status_code} ({url}): {r.text[:200]}")
     except Exception as e:
         print(f"Erro de Conexão na IA ({url}):", e)
-    return None, None
+    return []
 
 def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
     conn = get_db_connection()
@@ -564,31 +603,29 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         "resultado": ""
     }
     
-    # ---- EXTRAÇÃO DE STATUS E PLACA ----
-    placa = ""
-    status_veiculo = ""
-    usou_ia = False
+    # ---- EXTRAÇÃO DE STATUS E PLACAS ----
+    itens_extraidos = []
     
     # Tenta IA primeiro (se configurada)
     if config.get("llm_api_key"):
-        status_ia, placa_ia = analisar_mensagem_com_ia(texto_original, config)
-        log_entry["ia_status"] = str(status_ia)
-        log_entry["ia_placa"] = str(placa_ia)
-        
-        if status_ia:
-            # IA conseguiu extrair com sucesso
-            status_veiculo = status_ia
-            placa = placa_ia or ""
-            usou_ia = True
-            log_entry["resultado"] = f"IA extraiu: {status_ia} / {placa_ia}"
-    
-    # Fallback para heurística (se IA não configurada OU se IA retornou null)
-    if not usou_ia:
+        itens_ia = analisar_mensagem_com_ia(texto_original, config)
+        if itens_ia:
+            for item in itens_ia:
+                st = item.get("status")
+                pl = item.get("placa") or ""
+                if st:
+                    itens_extraidos.append({"status": st, "placa": pl})
+            if itens_extraidos:
+                log_entry["resultado"] = f"IA extraiu {len(itens_extraidos)} veículo(s)"
+
+    # Fallback para heurística (se IA não configurada OU se IA não retornou status válido)
+    if not itens_extraidos:
+        status_heuristico = ""
         texto_lower = texto_original.lower()
         if "indisponivel" in texto_lower or "indisponível" in texto_lower:
-            status_veiculo = "Indisponível"
+            status_heuristico = "Indisponível"
         elif "disponivel" in texto_lower or "disponível" in texto_lower:
-            status_veiculo = "Disponível"
+            status_heuristico = "Disponível"
         else:
             regex_disp = re.compile(config.get("palavra_chave", "dispon[ií]vel"), re.IGNORECASE)
             if not regex_disp.search(texto_original):
@@ -598,41 +635,51 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
                 if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
                 return
         
-        if not status_veiculo:
-            status_veiculo = "Disponível"
-        
-        log_entry["resultado"] = f"Heurística: {status_veiculo}"
-
-    # ---- EXTRAÇÃO DE PLACA (se IA não encontrou) ----
-    if not placa:
-        # 1. Busca padrão forte: 3 letras e 4 caracteres após
+        if not status_heuristico:
+            status_heuristico = "Disponível"
+            
+        # Extração de placas via regex (busca todas na mensagem)
+        placas_encontradas = []
         padrao_forte = re.compile(r"\b([A-Za-z]{3})[-\s]*([A-Za-z0-9]{4})\b")
         placas = padrao_forte.findall(texto_original)
         
         for p_letra, p_num in placas:
             p_num_corrigido = p_num.replace('o', '0').replace('O', '0')
             if any(char.isdigit() for char in p_num_corrigido):
-                placa = (p_letra + p_num_corrigido).upper()
-                break
+                placas_encontradas.append((p_letra + p_num_corrigido).upper())
                 
-        if not placa:
+        if not placas_encontradas:
             tres_letras = re.findall(r"\b([a-zA-Z]{3})\b", texto_original)
             blacklist = ["bom", "boa", "por", "com", "que", "pra", "uma", "dia", "não", "nao", "sim", "das", "dos", "nas", "nos", "tem", "foi", "vai", "vou", "fui", "vem", "seu"]
             tres_letras_validas = [p for p in tres_letras if p.lower() not in blacklist]
             if tres_letras_validas:
-                placa = tres_letras_validas[0].upper()
-    # ----------------------------------------
-            
-    if not placa:
-        # 3. Responde exigindo a placa se o admin escreveu uma mensagem pra isso. Do contrário, usa default
+                placas_encontradas.append(tres_letras_validas[0].upper())
+
+        if placas_encontradas:
+            for pl in placas_encontradas:
+                itens_extraidos.append({"status": status_heuristico, "placa": pl})
+        else:
+            itens_extraidos.append({"status": status_heuristico, "placa": ""})
+
+        log_entry["resultado"] = f"Heurística extraiu {len(itens_extraidos)} item(ns)"
+
+    # Se não houve placa em nenhum item, responde pedindo a placa
+    tem_alguma_placa = any(bool(it.get("placa")) for it in itens_extraidos)
+    if not tem_alguma_placa:
         if not is_sync:
-            msg_alerta = config.get("msg_erro_placa", "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso.")
-            if msg_alerta:
-                enviar_reposta(remote_jid, msg_alerta, config)
+            msg_alerta = (config.get("msg_erro_placa") or "").strip()
+            if not msg_alerta:
+                msg_alerta = "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso."
+            
+            enviado = enviar_reposta(remote_jid, msg_alerta, config)
+            log_entry["etapa"] = "alerta_placa"
+            log_entry["resultado"] = f"Auto-resposta disparada ({'sucesso' if enviado else 'falha envio WAHA'})"
+            PROCESS_LOG.append(log_entry)
+            if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
         return
+
     telefone = telefone_bruto.split("@")[0].split(":")[0]  
     
-    # ------------------ PEGA O NOME REAL DO GRUPO (Evolution API / WAHA) ------------------
     if "@g.us" in remote_jid:
         grupo = obter_nome_grupo(remote_jid, config)
     else:
@@ -645,22 +692,35 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
     data_operacao = dt_hora.strftime("%Y-%m-%d")
     horario_mensagem = dt_hora.strftime("%H:%M:%S")
     
-    # Abre nova conexão para salvar e garante fechamento
     conn = get_db_connection()
+    salvos = 0
     try:
-        # Verifica se já mandou hoje e atualiza, senão insere
-        existente = conn.execute("SELECT id FROM veiculos WHERE data_operacao=? AND telefone=?", (data_operacao, telefone)).fetchone()
-        
-        if existente:
-            conn.execute("UPDATE veiculos SET placa=?, grupo=?, horario_mensagem=?, mensagem_original=?, status=?, message_id=? WHERE id=?", 
-                         (placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id, existente["id"]))
-        else:
-            conn.execute("INSERT INTO veiculos (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, mensagem_original, status, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                         (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id))
-        
+        for item in itens_extraidos:
+            placa = item.get("placa")
+            status_veiculo = item.get("status", "Disponível")
+            if not placa: continue
+
+            # Chaveia por (data_operacao, telefone, placa) para permitir múltiplos veículos por motorista no mesmo dia
+            existente = conn.execute(
+                "SELECT id FROM veiculos WHERE data_operacao=? AND telefone=? AND placa=?", 
+                (data_operacao, telefone, placa)
+            ).fetchone()
+            
+            if existente:
+                conn.execute(
+                    "UPDATE veiculos SET grupo=?, horario_mensagem=?, mensagem_original=?, status=?, message_id=? WHERE id=?", 
+                    (grupo, horario_mensagem, texto_original, status_veiculo, message_id, existente["id"])
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO veiculos (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, mensagem_original, status, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id)
+                )
+            salvos += 1
+            
         conn.commit()
         log_entry["etapa"] = "salvo"
-        log_entry["resultado"] = f"{'UPDATE' if existente else 'INSERT'} | {status_veiculo} | {placa} | {motorista}"
+        log_entry["resultado"] = f"{salvos} veículo(s) salvo(s) para {motorista}"
         PROCESS_LOG.append(log_entry)
         if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
     except Exception as e:
@@ -776,6 +836,19 @@ async def chat_ia(req: ChatRequest, current_user: dict = Depends(get_current_use
     total_geral = conn.execute("SELECT COUNT(*) FROM veiculos").fetchone()[0]
     total_grupos = conn.execute("SELECT COUNT(DISTINCT grupo) FROM veiculos WHERE data_operacao = ?", (hoje,)).fetchone()[0]
     
+    # Top 10 veículos mais disponíveis no mês atual
+    mes_atual = date.today().strftime("%Y-%m")
+    top_mes_rows = conn.execute("""
+        SELECT placa, COUNT(*) as disp_cnt, GROUP_CONCAT(DISTINCT motorista) as motoristas 
+        FROM veiculos 
+        WHERE strftime('%Y-%m', data_operacao) = ? AND status = 'Disponível' 
+        GROUP BY placa ORDER BY disp_cnt DESC LIMIT 10
+    """, (mes_atual,)).fetchall()
+    
+    top_mes_txt = ""
+    for tm in top_mes_rows:
+        top_mes_txt += f"  - Placa {tm['placa']}: {tm['disp_cnt']} dias disponível este mês ({tm['motoristas']})\n"
+
     conn.close()
     
     # Montar detalhamento de hoje
@@ -813,6 +886,9 @@ Sua função é responder perguntas sobre o sistema de monitoramento de veículo
 ## DETALHAMENTO POR GRUPO (HOJE):
 {detalhe_grupos if detalhe_grupos else "Nenhum veículo registrado hoje."}
 
+## RANKING MENSAL DE DISPONIBILIDADE ({mes_atual}):
+{top_mes_txt if top_mes_txt else "Sem dados suficientes para o mês."}
+
 ## HISTÓRICO SEMANAL:
 {historico_txt if historico_txt else "Sem dados históricos."}
 
@@ -822,10 +898,10 @@ Sua função é responder perguntas sobre o sistema de monitoramento de veículo
 ## REGRAS DE RESPOSTA:
 - Responda SEMPRE em português do Brasil.
 - Seja conciso, objetivo e profissional.
+- Se perguntarem sobre qual carro foi mais disponível no mês ou semana, forneça os dados do ranking acima.
 - Se perguntarem sobre uma placa específica, procure nos dados acima e informe motorista, telefone, grupo e horário.
 - Se perguntarem sobre um motorista, procure pelo nome nos dados.
 - Se pedirem um resumo, forneça os números e destaque informações relevantes.
-- Se não tiver a informação, diga claramente que não há dados disponíveis.
 - Formate respostas com negrito (**texto**) para destacar informações importantes.
 - Use listas e estrutura quando necessário para facilitar a leitura.
 """
@@ -850,6 +926,219 @@ Sua função é responder perguntas sobre o sistema de monitoramento de veículo
             raise Exception(f"HTTP {r.status_code}: {r.text[:300]}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro na IA: {str(e)}")
+
+# --------- HELPER & ROTAS DE RELATÓRIOS GERENCIAIS ---------
+def calcular_intervalo_datas(periodo: str = "mes", data_inicio: str = None, data_fim: str = None):
+    agora = datetime.now(timezone(timedelta(hours=-3))).date()
+    if periodo == "hoje":
+        dt_ini = agora
+        dt_fim = agora
+    elif periodo == "semana":
+        dt_ini = agora - timedelta(days=agora.weekday())
+        dt_fim = agora
+    elif periodo == "mes":
+        dt_ini = agora.replace(day=1)
+        dt_fim = agora
+    elif periodo == "30dias":
+        dt_ini = agora - timedelta(days=30)
+        dt_fim = agora
+    elif periodo == "custom" and data_inicio and data_fim:
+        try:
+            dt_ini = datetime.strptime(data_inicio, "%Y-%m-%d").date()
+            dt_fim = datetime.strptime(data_fim, "%Y-%m-%d").date()
+        except:
+            dt_ini = agora.replace(day=1)
+            dt_fim = agora
+    else:
+        dt_ini = agora.replace(day=1)
+        dt_fim = agora
+
+    return dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
+
+@app.get("/api/relatorios/resumo")
+async def relatorio_resumo(
+    periodo: str = "mes", 
+    data_inicio: str = None, 
+    data_fim: str = None, 
+    grupo: str = None,
+    current_user: dict = Depends(get_current_user)
+):
+    dt_ini, dt_fim = calcular_intervalo_datas(periodo, data_inicio, data_fim)
+    conn = get_db_connection()
+    
+    filtro_grupo = ""
+    params_grupo = []
+    if grupo:
+        filtro_grupo = " AND grupo = ?"
+        params_grupo = [grupo]
+
+    # 1. Ranking de veículos mais disponíveis
+    sql_ranking = f"""
+        SELECT 
+            placa,
+            COUNT(*) as total_registros,
+            SUM(CASE WHEN status = 'Disponível' THEN 1 ELSE 0 END) as disponivel_cnt,
+            SUM(CASE WHEN status = 'Indisponível' THEN 1 ELSE 0 END) as indisponivel_cnt,
+            MAX(data_operacao) as ultima_data,
+            GROUP_CONCAT(DISTINCT motorista) as motoristas
+        FROM veiculos
+        WHERE data_operacao BETWEEN ? AND ? {filtro_grupo}
+        GROUP BY placa
+        ORDER BY disponivel_cnt DESC, total_registros DESC
+        LIMIT 30
+    """
+    ranking = [dict(r) for r in conn.execute(sql_ranking, [dt_ini, dt_fim] + params_grupo).fetchall()]
+    
+    # 2. Resumo geral de status
+    sql_status = f"""
+        SELECT 
+            COUNT(*) as total_registros,
+            SUM(CASE WHEN status = 'Disponível' THEN 1 ELSE 0 END) as total_disponiveis,
+            SUM(CASE WHEN status = 'Indisponível' THEN 1 ELSE 0 END) as total_indisponiveis,
+            COUNT(DISTINCT placa) as total_placas_unicas,
+            COUNT(DISTINCT telefone) as total_motoristas_unicos
+        FROM veiculos
+        WHERE data_operacao BETWEEN ? AND ? {filtro_grupo}
+    """
+    status_row = dict(conn.execute(sql_status, [dt_ini, dt_fim] + params_grupo).fetchone() or {})
+    
+    # 3. Resumo por grupo
+    sql_grupos = f"""
+        SELECT 
+            grupo,
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'Disponível' THEN 1 ELSE 0 END) as disponiveis
+        FROM veiculos
+        WHERE data_operacao BETWEEN ? AND ?
+        GROUP BY grupo
+        ORDER BY total DESC
+    """
+    grupos = [dict(g) for g in conn.execute(sql_grupos, [dt_ini, dt_fim]).fetchall()]
+    
+    # 4. Top motoristas mais ativos
+    sql_motoristas = f"""
+        SELECT 
+            motorista,
+            telefone,
+            COUNT(*) as total_registros,
+            COUNT(DISTINCT placa) as total_placas
+        FROM veiculos
+        WHERE data_operacao BETWEEN ? AND ? {filtro_grupo}
+        GROUP BY telefone
+        ORDER BY total_registros DESC
+        LIMIT 10
+    """
+    motoristas = [dict(m) for m in conn.execute(sql_motoristas, [dt_ini, dt_fim] + params_grupo).fetchall()]
+    
+    conn.close()
+    
+    total = status_row.get("total_registros", 0) or 0
+    disp = status_row.get("total_disponiveis", 0) or 0
+    taxa_disp = round((disp / total * 100), 1) if total > 0 else 0.0
+    
+    top_veiculo = ranking[0]["placa"] if ranking else "Nenhum"
+    top_veiculo_cnt = ranking[0]["disponivel_cnt"] if ranking else 0
+    top_motorista = motoristas[0]["motorista"] if motoristas else "Nenhum"
+
+    return {
+        "periodo": {"data_inicio": dt_ini, "data_fim": dt_fim, "tipo": periodo},
+        "indicadores": {
+            "top_veiculo": top_veiculo,
+            "top_veiculo_dias": top_veiculo_cnt,
+            "taxa_disponibilidade": taxa_disp,
+            "total_registros": total,
+            "total_disponiveis": disp,
+            "total_indisponiveis": status_row.get("total_indisponiveis", 0) or 0,
+            "total_placas_unicas": status_row.get("total_placas_unicas", 0) or 0,
+            "top_motorista": top_motorista
+        },
+        "ranking_veiculos": ranking,
+        "grupos": grupos,
+        "motoristas": motoristas
+    }
+
+@app.get("/api/relatorios/detalhado")
+async def relatorio_detalhado(
+    periodo: str = "mes",
+    data_inicio: str = None,
+    data_fim: str = None,
+    grupo: str = None,
+    placa: str = None,
+    status: str = None,
+    current_user: dict = Depends(get_current_user)
+):
+    dt_ini, dt_fim = calcular_intervalo_datas(periodo, data_inicio, data_fim)
+    conn = get_db_connection()
+    
+    sql = "SELECT * FROM veiculos WHERE data_operacao BETWEEN ? AND ?"
+    params = [dt_ini, dt_fim]
+    
+    if grupo:
+        sql += " AND grupo = ?"
+        params.append(grupo)
+    if placa:
+        sql += " AND placa LIKE ?"
+        params.append(f"%{placa.strip().upper()}%")
+    if status:
+        sql += " AND status = ?"
+        params.append(status)
+        
+    sql += " ORDER BY data_operacao DESC, horario_mensagem DESC"
+    
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+@app.get("/api/relatorios/exportar")
+async def exportar_relatorio_csv(
+    periodo: str = "mes",
+    data_inicio: str = None,
+    data_fim: str = None,
+    grupo: str = None,
+    status: str = None,
+    current_user: dict = Depends(get_current_user)
+):
+    dt_ini, dt_fim = calcular_intervalo_datas(periodo, data_inicio, data_fim)
+    conn = get_db_connection()
+    
+    sql = "SELECT data_operacao, horario_mensagem, grupo, motorista, telefone, placa, status, mensagem_original FROM veiculos WHERE data_operacao BETWEEN ? AND ?"
+    params = [dt_ini, dt_fim]
+    
+    if grupo:
+        sql += " AND grupo = ?"
+        params.append(grupo)
+    if status:
+        sql += " AND status = ?"
+        params.append(status)
+        
+    sql += " ORDER BY data_operacao DESC, horario_mensagem DESC"
+    
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(["Data Operacao", "Horario", "Grupo", "Motorista", "Telefone", "Placa", "Status", "Mensagem Original"])
+    
+    for r in rows:
+        writer.writerow([
+            r["data_operacao"],
+            r["horario_mensagem"],
+            r["grupo"],
+            r["motorista"],
+            r["telefone"],
+            r["placa"],
+            r["status"],
+            r["mensagem_original"]
+        ])
+        
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    filename = f"relatorio_giannone_{dt_ini}_a_{dt_fim}.csv"
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 if __name__ == "__main__":
     import uvicorn
