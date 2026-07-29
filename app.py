@@ -413,6 +413,53 @@ def enviar_reposta(jid, texto, config):
         pass
 
 import json
+
+def parse_llm_response(text: str) -> str:
+    text = text.strip()
+    
+    # Se o servidor enviou stream SSE (data: ...)
+    if "data:" in text:
+        chunks = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                payload_str = line[5:].strip()
+                if payload_str and payload_str != "[DONE]":
+                    try:
+                        obj = json.loads(payload_str)
+                        choice = obj.get("choices", [{}])[0]
+                        chunk = choice.get("delta", {}).get("content") or choice.get("message", {}).get("content") or ""
+                        if chunk:
+                            chunks.append(chunk)
+                    except Exception:
+                        pass
+        if chunks:
+            return "".join(chunks)
+
+    # Tenta parsing JSON padrão ou raw_decode (para objetos JSON concatenados / extra data)
+    try:
+        data = json.loads(text)
+    except Exception:
+        try:
+            data, _ = json.JSONDecoder().raw_decode(text)
+        except Exception:
+            raise ValueError(f"Resposta inválida da IA: {text[:150]}")
+            
+    if isinstance(data, dict):
+        choices = data.get("choices", [])
+        if choices:
+            c = choices[0]
+            if isinstance(c, dict):
+                msg = c.get("message", {})
+                if isinstance(msg, dict) and "content" in msg and msg["content"] is not None:
+                    return str(msg["content"])
+                delta = c.get("delta", {})
+                if isinstance(delta, dict) and "content" in delta and delta["content"] is not None:
+                    return str(delta["content"])
+                if "text" in c and c["text"] is not None:
+                    return str(c["text"])
+    raise ValueError(f"Formato de resposta inesperado da IA: {text[:150]}")
+
 def get_llm_url(config):
     base = (config.get("llm_base_url") or "").strip().rstrip("/")
     if not base: 
@@ -443,13 +490,13 @@ JSON:"""
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1
+        "temperature": 0.1,
+        "stream": False
     }
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=12)
         if r.ok:
-            data = r.json()
-            txt = data["choices"][0]["message"]["content"].strip()
+            txt = parse_llm_response(r.text).strip()
             if txt.startswith("```json"): txt = txt[7:-3].strip()
             if txt.startswith("```"): txt = txt[3:-3].strip()
             js = json.loads(txt)
@@ -678,12 +725,12 @@ async def test_llm(current_user: dict = Depends(get_current_user)):
             "model": model,
             "messages": [{"role": "user", "content": "Responda apenas com a frase: IA funcionando corretamente."}],
             "max_tokens": 30,
-            "temperature": 0.1
+            "temperature": 0.1,
+            "stream": False
         }
         r = requests.post(url, headers=headers, json=payload, timeout=15)
         if r.ok:
-            data = r.json()
-            txt = data["choices"][0]["message"]["content"].strip()
+            txt = parse_llm_response(r.text).strip()
             return {"status": "ok", "model": model, "test_response": txt, "url": url}
         else:
             err_msg = f"HTTP {r.status_code}"
@@ -705,12 +752,12 @@ async def chat_ia(req: ChatRequest, current_user: dict = Depends(get_current_use
     conn = get_db_connection()
     config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
     
-    api_key = config.get("llm_api_key")
+    api_key = (config.get("llm_api_key") or "").strip()
     if not api_key:
         conn.close()
         raise HTTPException(status_code=400, detail="IA não configurada. Adicione a API Key nas Configurações.")
     
-    model = config.get("llm_model") or "meta/llama-3.3-70b-instruct"
+    model = (config.get("llm_model") or "").strip() or "meta/llama-3.3-70b-instruct"
     
     # ===== CONTEXTO COMPLETO DO BANCO DE DADOS =====
     hoje = date.today().strftime("%Y-%m-%d")
@@ -792,12 +839,12 @@ Sua função é responder perguntas sobre o sistema de monitoramento de veículo
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": req.pergunta}
             ],
-            "max_tokens": 1200
+            "max_tokens": 1200,
+            "stream": False
         }
         r = requests.post(url, headers=headers, json=payload, timeout=25)
         if r.ok:
-            data = r.json()
-            txt = data["choices"][0]["message"]["content"].strip()
+            txt = parse_llm_response(r.text).strip()
             return {"resposta": txt}
         else:
             raise Exception(f"HTTP {r.status_code}: {r.text[:300]}")
