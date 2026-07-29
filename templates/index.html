@@ -535,14 +535,18 @@
             nvidia:     { url: 'https://integrate.api.nvidia.com/v1', model: 'meta/llama-3.3-70b-instruct', placeholder: 'nvapi-...' },
             openrouter: { url: 'https://openrouter.ai/api/v1',       model: 'google/gemini-2.5-flash-lite-preview', placeholder: 'sk-or-v1-...' },
             groq:       { url: 'https://api.groq.com/openai/v1',     model: 'llama-3.3-70b-versatile', placeholder: 'gsk_...' },
-            custom:     { url: '',                                     model: '', placeholder: 'sua-chave-aqui' }
+            custom:     { url: 'https://111-9router.raojgo.easypanel.host/v1', model: 'gpt-4o-mini', placeholder: 'sua-chave-api' }
         };
 
         function onProviderChange() {
             const provider = document.getElementById('llm-provider').value;
             const p = PROVIDERS[provider];
-            document.getElementById('llm-base-url').value = p.url;
-            document.getElementById('llm-model').value = p.model;
+            if (provider !== 'custom') {
+                document.getElementById('llm-base-url').value = p.url;
+                document.getElementById('llm-model').value = p.model;
+            } else if (!document.getElementById('llm-base-url').value) {
+                document.getElementById('llm-base-url').value = p.url;
+            }
             document.getElementById('llm-api-key').placeholder = p.placeholder;
         }
 
@@ -675,7 +679,7 @@
                 await saveAllConfig();
                 const res = await fetchAPI('/api/llm/test', { method: 'POST' });
                 if(res.status === 'ok') {
-                    msg.textContent = `✅ IA funcionando! Resposta: "${res.test_response}"`;
+                    msg.textContent = `✅ IA funcionando! Endpoint: ${res.url} | Resposta: "${res.test_response}"`;
                     msg.style.color = '#34d399';
                 } else if(res.status === 'not_configured') {
                     msg.textContent = '⚠️ API Key não preenchida.';

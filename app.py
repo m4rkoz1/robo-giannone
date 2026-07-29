@@ -414,14 +414,18 @@ def enviar_reposta(jid, texto, config):
 
 import json
 def get_llm_url(config):
-    base = config.get("llm_base_url", "").rstrip("/")
-    if not base: base = "https://integrate.api.nvidia.com/v1"
+    base = (config.get("llm_base_url") or "").strip().rstrip("/")
+    if not base: 
+        base = "https://integrate.api.nvidia.com/v1"
+    
+    if base.endswith("/chat/completions"):
+        return base
     return f"{base}/chat/completions"
 
 def analisar_mensagem_com_ia(texto, config):
-    api_key = config.get("llm_api_key")
+    api_key = (config.get("llm_api_key") or "").strip()
     if not api_key: return None, None
-    model = config.get("llm_model") or "meta/llama-3.3-70b-instruct"
+    model = (config.get("llm_model") or "").strip() or "meta/llama-3.3-70b-instruct"
     
     url = get_llm_url(config)
     prompt = f"""Você extrai dados de mensagens de motoristas de caminhão.
@@ -438,7 +442,8 @@ JSON:"""
     }
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}]
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1
     }
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=12)
@@ -452,8 +457,10 @@ JSON:"""
             pl = js.get("placa")
             if isinstance(pl, str): pl = pl.strip().upper().replace(" ", "").replace("-", "")
             return st, pl
+        else:
+            print(f"Erro na IA HTTP {r.status_code} ({url}): {r.text[:200]}")
     except Exception as e:
-        print("Erro na IA:", e)
+        print(f"Erro de Conexão na IA ({url}):", e)
     return None, None
 
 def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
@@ -658,30 +665,39 @@ async def test_llm(current_user: dict = Depends(get_current_user)):
     config = dict(conn.execute("SELECT * FROM config LIMIT 1").fetchone() or {})
     conn.close()
     
-    api_key = config.get("llm_api_key")
+    api_key = (config.get("llm_api_key") or "").strip()
     if not api_key:
         return {"status": "not_configured"}
     
-    model = config.get("llm_model") or "meta/llama-3.3-70b-instruct"
+    model = (config.get("llm_model") or "").strip() or "meta/llama-3.3-70b-instruct"
+    url = get_llm_url(config)
     
     try:
-        url = get_llm_url(config)
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "Responda apenas com a frase: IA funcionando corretamente."}],
-            "max_tokens": 30
+            "max_tokens": 30,
+            "temperature": 0.1
         }
-        r = requests.post(url, headers=headers, json=payload, timeout=12)
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
         if r.ok:
             data = r.json()
             txt = data["choices"][0]["message"]["content"].strip()
-            base_url = config.get('llm_base_url', 'NVIDIA NIM')
-            return {"status": "ok", "model": model, "test_response": txt}
+            return {"status": "ok", "model": model, "test_response": txt, "url": url}
         else:
-            return {"status": "error", "detail": f"HTTP {r.status_code}: {r.text[:200]}"}
+            err_msg = f"HTTP {r.status_code}"
+            if r.status_code == 401:
+                err_msg += " (Não Autorizado: API Key inválida para este endpoint)"
+            elif r.status_code == 404:
+                err_msg += " (Não Encontrado: Verifique a URL Base e se o Modelo existe no provedor)"
+            elif r.status_code in (400, 422):
+                err_msg += f" (Requisição Rejeitada: {r.text[:180]})"
+            else:
+                err_msg += f": {r.text[:180]}"
+            return {"status": "error", "detail": err_msg, "url": url}
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        return {"status": "error", "detail": f"Erro de Conexão ({type(e).__name__}): {str(e)}", "url": url}
 
 # --------- ROTA DE CHAT IA (ASSISTENTE) ---------
 @app.post("/api/chat")
