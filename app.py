@@ -257,6 +257,19 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
         for chat in grupo_chats:
             chat_id = chat.get("id", "")
             if not chat_id: continue
+
+            # Preenche nome do grupo se disponível no objeto do chat
+            chat_name = chat.get("name") or chat.get("subject") or chat.get("topic")
+            if chat_name and isinstance(chat_name, str) and chat_name.strip():
+                nome_limpo = chat_name.strip()
+                CACHE_GRUPOS[chat_id] = nome_limpo
+                sufixo_4 = chat_id.split('@')[0][-4:]
+                try:
+                    conn_sync = get_db_connection()
+                    conn_sync.execute("UPDATE veiculos SET grupo = ? WHERE grupo = ?", (nome_limpo, f"Grupo ({sufixo_4})"))
+                    conn_sync.commit()
+                    conn_sync.close()
+                except Exception: pass
             
             try:
                 msgs_url = f"{base}/api/{session}/chats/{chat_id}/messages?limit=100&sortOrder=desc"
@@ -370,27 +383,86 @@ def processar_mensagem_apagada(payload, is_waha):
         conn.close()
 
 CACHE_GRUPOS = {}
-def obter_nome_grupo(jid, config):
-    if jid in CACHE_GRUPOS: return CACHE_GRUPOS[jid]
+def obter_nome_grupo(jid: str, config: dict, payload: dict = None) -> str:
+    if not jid or "@g.us" not in jid:
+        return "Chat Privado"
+        
+    if jid in CACHE_GRUPOS:
+        return CACHE_GRUPOS[jid]
+
+    sufixo_4 = jid.split('@')[0][-4:]
+    nome_padrao = f"Grupo ({sufixo_4})"
+
+    # 1. Tenta extrair o nome do grupo DIRETAMENTE do payload do webhook (sem requisição extra HTTP)
+    if payload and isinstance(payload, dict):
+        p_data = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload.get("data", {})
+        if not isinstance(p_data, dict): p_data = {}
+        
+        nome_payload = (
+            payload.get("_data", {}).get("chat", {}).get("name") or
+            p_data.get("_data", {}).get("chat", {}).get("name") or
+            payload.get("chat", {}).get("name") or
+            p_data.get("chat", {}).get("name") or
+            payload.get("groupInfo", {}).get("subject") or
+            p_data.get("groupInfo", {}).get("subject") or
+            payload.get("groupMetadata", {}).get("subject") or
+            p_data.get("groupMetadata", {}).get("subject") or
+            payload.get("group", {}).get("name") or
+            p_data.get("group", {}).get("name")
+        )
+        
+        if nome_payload and isinstance(nome_payload, str) and nome_payload.strip():
+            nome_limpo = nome_payload.strip()
+            CACHE_GRUPOS[jid] = nome_limpo
+            try:
+                conn = get_db_connection()
+                conn.execute("UPDATE veiculos SET grupo = ? WHERE grupo = ?", (nome_limpo, nome_padrao))
+                conn.commit()
+                conn.close()
+            except Exception: pass
+            return nome_limpo
+
+    # 2. Busca via API HTTP (WAHA / Evolution)
     if not config.get('evo_url') or not config.get('evo_instance'):
-        return f"Grupo ({jid.split('@')[0][-4:]})"
-    try:
-        # A API WAHA usa essa rota para extrair os Info do Grupo
-        url = f"{config['evo_url'].rstrip('/')}/api/groups/{jid}?session={config['evo_instance']}"
-        headers = {}
-        if config.get('evo_apikey'):
-            headers["X-Api-Key"] = config['evo_apikey']
-            
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.ok:
-            data = resp.json()
-            nome = data.get('name') or data.get('subject')
-            if nome:
-                CACHE_GRUPOS[jid] = nome
-                return nome
-    except:
-        pass
-    return f"Grupo ({jid.split('@')[0][-4:]})"
+        return nome_padrao
+        
+    base_url = config['evo_url'].rstrip('/')
+    session = config['evo_instance']
+    api_key = (config.get('evo_apikey') or "").strip()
+    
+    headers_waha = {"accept": "application/json"}
+    if api_key:
+        headers_waha["X-Api-Key"] = api_key
+        headers_waha["apikey"] = api_key
+
+    urls = [
+        f"{base_url}/api/groups/{jid}?session={session}",
+        f"{base_url}/api/{session}/chats/{jid}",
+        f"{base_url}/api/chats/{jid}?session={session}",
+        f"{base_url}/group/findGroupInfos/{session}?groupJid={jid}"
+    ]
+    
+    for u in urls:
+        try:
+            r = requests.get(u, headers=headers_waha, timeout=4)
+            if r.ok:
+                data = r.json()
+                if isinstance(data, dict):
+                    nome = data.get('name') or data.get('subject') or data.get('topic')
+                    if nome and isinstance(nome, str) and nome.strip():
+                        nome_limpo = nome.strip()
+                        CACHE_GRUPOS[jid] = nome_limpo
+                        try:
+                            conn = get_db_connection()
+                            conn.execute("UPDATE veiculos SET grupo = ? WHERE grupo = ?", (nome_limpo, nome_padrao))
+                            conn.commit()
+                            conn.close()
+                        except Exception: pass
+                        return nome_limpo
+        except Exception:
+            pass
+
+    return nome_padrao
 
 def enviar_reposta(jid, texto, config):
     if not config.get('evo_url') or not config.get('evo_instance'):
@@ -681,12 +753,17 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
     telefone = telefone_bruto.split("@")[0].split(":")[0]  
     
     if "@g.us" in remote_jid:
-        grupo = obter_nome_grupo(remote_jid, config)
+        grupo = obter_nome_grupo(remote_jid, config, payload)
     else:
         grupo = "Chat Privado"
     
     agora_sp = datetime.now(timezone(timedelta(hours=-3)))
-    timestamp_msg = data.get("messageTimestamp", int(agora_sp.timestamp()))
+    ts_val = data.get("messageTimestamp") or data.get("timestamp")
+    try:
+        timestamp_msg = int(ts_val) if ts_val is not None else int(agora_sp.timestamp())
+    except (ValueError, TypeError):
+        timestamp_msg = int(agora_sp.timestamp())
+
     dt_hora = datetime.fromtimestamp(timestamp_msg, tz=timezone(timedelta(hours=-3)))
     
     data_operacao = dt_hora.strftime("%Y-%m-%d")

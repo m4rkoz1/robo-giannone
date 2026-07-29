@@ -508,6 +508,16 @@
                 loadUsers();
             }
             loadVeiculos();
+
+            // Auto-refresh automático da grelha a cada 15 segundos
+            if (!window.autoRefreshInterval) {
+                window.autoRefreshInterval = setInterval(() => {
+                    const tabLista = document.getElementById('tab-lista');
+                    if (tabLista && tabLista.classList.contains('active')) {
+                        loadVeiculos(true);
+                    }
+                }, 15000);
+            }
         }
 
         function logout() {
@@ -689,13 +699,12 @@
         }
 
         // ===================== LISTA DIÁRIA =====================
-        async function loadVeiculos() {
+        async function loadVeiculos(silent = false) {
             const date = document.getElementById('filter-date').value;
             const grid = document.getElementById('veiculos-grid');
-            grid.innerHTML = '<div class="text-center w-100">Carregando...</div>';
+            if(!silent) grid.innerHTML = '<div class="text-center w-100">Carregando...</div>';
             try {
                 const data = await fetchAPI(`/api/disponiveis?dia=${date}`);
-                grid.innerHTML = '';
                 if(data.length === 0) {
                     grid.innerHTML = '<div class="glass-card p-4 text-center">Nenhum veículo registrado neste dia.</div>';
                     return;
@@ -707,6 +716,7 @@
                     grouped[v.grupo].push(v);
                 });
 
+                let fullHtml = '';
                 for (const [nomeGrupo, veiculos] of Object.entries(grouped)) {
                     let itemsHtml = veiculos.map(v => {
                         let statusHtml = v.status === 'Indisponível' 
@@ -751,7 +761,7 @@
                            </div>`
                         : '';
                         
-                    grid.innerHTML += `
+                    fullHtml += `
                         <div class="glass-card group-card">
                             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem; padding-bottom:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05)">
                                 <h3 class="group-title" style="margin:0; border:none; padding:0">${nomeGrupo}</h3>
@@ -761,7 +771,10 @@
                         </div>
                     `;
                 }
-            } catch(e) { grid.innerHTML = `<div class="error-msg text-center">Erro ao carregar</div>`; }
+                grid.innerHTML = fullHtml;
+            } catch(e) { 
+                if(!silent) grid.innerHTML = `<div class="error-msg text-center">Erro ao carregar</div>`; 
+            }
         }
 
         // ===================== CONFIGURAÇÕES =====================
