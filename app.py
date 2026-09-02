@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 import os
 import jwt
 from models import ConfigUpdate
-from database import init_db, get_db_connection
+from database import init_db, get_db_connection, USE_POSTGRES
 
 # Configurações de Segurança - via env (EasyPanel > Environment)
 SECRET_KEY = os.getenv("SECRET_KEY", os.getenv("JWT_SECRET", "GIANNONE_SUPER_SECRET"))
@@ -987,18 +987,31 @@ async def chat_ia(req: ChatRequest, current_user: dict = Depends(get_current_use
         (semana,)
     ).fetchall()
     
-    # Total geral no banco
-    total_geral = conn.execute("SELECT COUNT(*) FROM veiculos").fetchone()[0]
-    total_grupos = conn.execute("SELECT COUNT(DISTINCT grupo) FROM veiculos WHERE data_operacao = ?", (hoje,)).fetchone()[0]
+    # Total geral no banco (compat SQLite/Postgres)
+    def _scalar(sql, params=()):
+        row = conn.execute(sql, params).fetchone()
+        if row is None: return 0
+        if isinstance(row, dict): return list(row.values())[0]
+        return row[0]
+    total_geral = _scalar("SELECT COUNT(*) as cnt FROM veiculos")
+    total_grupos = _scalar("SELECT COUNT(DISTINCT grupo) as cnt FROM veiculos WHERE data_operacao = ?", (hoje,))
     
-    # Top 10 veículos mais disponíveis no mês atual
+    # Top 10 veículos mais disponíveis no mês atual (compat: LIKE em vez de strftime, sem GROUP_CONCAT)
     mes_atual = date.today().strftime("%Y-%m")
+    # Usa LIKE 'YYYY-MM%' que funciona em SQLite e Postgres (data_operacao é TEXT)
     top_mes_rows = conn.execute("""
-        SELECT placa, COUNT(*) as disp_cnt, GROUP_CONCAT(DISTINCT motorista) as motoristas 
-        FROM veiculos 
-        WHERE strftime('%Y-%m', data_operacao) = ? AND status = 'Disponível' 
+        SELECT placa, COUNT(*) as disp_cnt FROM veiculos 
+        WHERE data_operacao LIKE ? AND status = 'Disponível' 
         GROUP BY placa ORDER BY disp_cnt DESC LIMIT 10
-    """, (mes_atual,)).fetchall()
+    """, (f"{mes_atual}%",)).fetchall()
+    # Busca motoristas separadamente para evitar GROUP_CONCAT/STRING_AGG incompatível
+    for tm in top_mes_rows:
+        # tm é dict-like; adiciona motoristas via query auxiliar
+        try:
+            mot_rows = conn.execute("SELECT DISTINCT motorista FROM veiculos WHERE placa = ? AND data_operacao LIKE ?", (tm["placa"], f"{mes_atual}%")).fetchall()
+            tm["motoristas"] = ", ".join([r["motorista"] for r in mot_rows])
+        except Exception:
+            tm["motoristas"] = tm.get("motoristas", "")
     
     top_mes_txt = ""
     for tm in top_mes_rows:
@@ -1127,7 +1140,11 @@ async def relatorio_resumo(
         filtro_grupo = " AND grupo = ?"
         params_grupo = [grupo]
 
-    # 1. Ranking de veículos mais disponíveis
+    # 1. Ranking de veículos mais disponíveis (compat: sem GROUP_CONCAT)
+    if USE_POSTGRES:
+        agg_motoristas = "STRING_AGG(DISTINCT motorista, ', ')"
+    else:
+        agg_motoristas = "GROUP_CONCAT(DISTINCT motorista)"
     sql_ranking = f"""
         SELECT 
             placa,
@@ -1135,7 +1152,7 @@ async def relatorio_resumo(
             SUM(CASE WHEN status = 'Disponível' THEN 1 ELSE 0 END) as disponivel_cnt,
             SUM(CASE WHEN status = 'Indisponível' THEN 1 ELSE 0 END) as indisponivel_cnt,
             MAX(data_operacao) as ultima_data,
-            GROUP_CONCAT(DISTINCT motorista) as motoristas
+            {agg_motoristas} as motoristas
         FROM veiculos
         WHERE data_operacao BETWEEN ? AND ? {filtro_grupo}
         GROUP BY placa
