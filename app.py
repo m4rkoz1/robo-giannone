@@ -238,13 +238,37 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
     erros = []
     
     try:
-        # 1. Busca lista de chats (grupos @g.us)
-        chats_url = f"{base}/api/{session}/chats?limit=50&sortBy=conversationTimestamp&sortOrder=desc"
-        r = requests.get(chats_url, headers=h, timeout=15)
-        if not r.ok:
-            raise Exception(f"Erro ao listar chats: HTTP {r.status_code} - {r.text[:200]}")
-        
-        chats = r.json()
+        # 1. Busca lista de chats (grupos @g.us) - tenta múltiplos endpoints (CORE/PLUS/PRO)
+        import urllib.parse
+        chats = None
+        last_err = ""
+        chat_urls = [
+            f"{base}/api/{session}/chats?limit=50&sortBy=conversationTimestamp&sortOrder=desc",
+            f"{base}/api/{session}/chats/overview?limit=50",
+            f"{base}/api/{session}/chats?limit=100",
+            f"{base}/api/sessions/{session}/chats?limit=50",
+            f"{base}/api/chats?session={session}&limit=50",
+        ]
+        for chats_url in chat_urls:
+            try:
+                r = requests.get(chats_url, headers=h, timeout=15)
+                if r.ok:
+                    j = r.json()
+                    # WAHA PLUS pode retornar {data: [...]} ou lista direta ou {chats: [...]}
+                    if isinstance(j, list):
+                        chats = j
+                    elif isinstance(j, dict):
+                        chats = j.get("data") or j.get("chats") or j.get("items") or []
+                        if not chats and len(j) > 0 and "id" in j:
+                            chats = [j]  # resposta single chat
+                    if chats is not None and len(chats) >= 0:
+                        break
+                last_err = f"{chats_url} -> HTTP {r.status_code}: {r.text[:120]}"
+            except Exception as ex:
+                last_err = f"{chats_url} -> {ex}"
+                continue
+        if chats is None:
+            raise Exception(f"Nenhum endpoint de chats respondeu. Último erro: {last_err} | Base: {base} Session: {session} (verifique se a sessão existe e está STARTED na WAHA)")
         if isinstance(chats, dict): chats = chats.get("data", [])
         
         # Filtra apenas grupos
@@ -276,14 +300,31 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
                 except Exception: pass
             
             try:
-                msgs_url = f"{base}/api/{session}/chats/{chat_id}/messages?limit=100&sortOrder=desc"
-                r2 = requests.get(msgs_url, headers=h, timeout=15)
-                if not r2.ok: 
-                    erros.append(f"{chat_id}: HTTP {r2.status_code}")
-                    continue
-                
-                msgs = r2.json()
-                if isinstance(msgs, dict): msgs = msgs.get("data", [])
+                enc_id = urllib.parse.quote(chat_id, safe='')
+                # Tenta 2 variantes de endpoint de mensagens
+                msgs = None
+                for msgs_url in [
+                    f"{base}/api/{session}/chats/{enc_id}/messages?limit=100&sortOrder=desc",
+                    f"{base}/api/{session}/chats/{enc_id}/messages?limit=100",
+                    f"{base}/api/{session}/chats/{chat_id}/messages?limit=100&sortOrder=desc",
+                ]:
+                    try:
+                        r2 = requests.get(msgs_url, headers=h, timeout=15)
+                        if r2.ok:
+                            j2 = r2.json()
+                            if isinstance(j2, dict): msgs = j2.get("data") or j2.get("messages") or []
+                            else: msgs = j2
+                            break
+                        else:
+                            last_msg_err = f"HTTP {r2.status_code}"
+                    except Exception as ex2:
+                        last_msg_err = str(ex2)[:80]
+                        continue
+                if msgs is None or not isinstance(msgs, list):
+                    if isinstance(msgs, dict): msgs = msgs.get("data", []) or []
+                    if msgs is None:
+                        erros.append(f"{chat_id}: {last_msg_err if 'last_msg_err' in locals() else 'sem resposta'}")
+                        continue
                 
                 for m in msgs:
                     # Filtra apenas últimas 24h
