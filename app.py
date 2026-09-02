@@ -632,6 +632,8 @@ import json
 
 def parse_llm_response(text: str) -> str:
     text = text.strip()
+    if not text:
+        raise ValueError("Resposta vazia da IA")
     
     # Se o servidor enviou stream SSE (data: ...)
     if "data:" in text:
@@ -644,13 +646,17 @@ def parse_llm_response(text: str) -> str:
                     try:
                         obj = json.loads(payload_str)
                         choice = obj.get("choices", [{}])[0]
-                        chunk = choice.get("delta", {}).get("content") or choice.get("message", {}).get("content") or ""
+                        # tenta delta, message, text
+                        chunk = choice.get("delta", {}).get("content")
+                        if chunk is None: chunk = choice.get("message", {}).get("content")
+                        if chunk is None: chunk = choice.get("text", "")
                         if chunk:
-                            chunks.append(chunk)
+                            chunks.append(str(chunk))
                     except Exception:
                         pass
         if chunks:
-            return "".join(chunks)
+            joined = "".join(chunks).strip()
+            if joined: return joined
 
     # Tenta parsing JSON padrão ou raw_decode (para objetos JSON concatenados / extra data)
     try:
@@ -658,20 +664,33 @@ def parse_llm_response(text: str) -> str:
     except Exception:
         try:
             data, _ = json.JSONDecoder().raw_decode(text)
-        except Exception:
-            raise ValueError(f"Resposta inválida da IA: {text[:150]}")
+        except Exception as e:
+            # Se não é JSON, retorna texto puro (pode ser resposta direta)
+            if len(text) > 5 and "choices" not in text.lower():
+                return text
+            raise ValueError(f"Resposta inválida da IA: {text[:300]}")
             
     if isinstance(data, dict):
+        # Alguns provedores retornam {"response": "..."} ou {"content": "..."}
+        if not data.get("choices") and data.get("response"):
+            return str(data["response"])
+        if not data.get("choices") and data.get("content"):
+            return str(data["content"])
         choices = data.get("choices", [])
         if choices:
             c = choices[0]
             if isinstance(c, dict):
                 msg = c.get("message", {})
-                if isinstance(msg, dict) and "content" in msg and msg["content"] is not None:
+                if isinstance(msg, dict) and "content" in msg and msg["content"]:
                     return str(msg["content"])
                 delta = c.get("delta", {})
-                if isinstance(delta, dict) and "content" in delta and delta["content"] is not None:
+                if isinstance(delta, dict) and "content" in delta and delta["content"]:
                     return str(delta["content"])
+                if c.get("text"):
+                    return str(c["text"])
+                # fallback para qualquer campo string
+                for k in ("content","text","response"):
+                    if c.get(k): return str(c[k])
                 if "text" in c and c["text"] is not None:
                     return str(c["text"])
     raise ValueError(f"Formato de resposta inesperado da IA: {text[:150]}")
@@ -1142,12 +1161,25 @@ Sua função é responder perguntas sobre o sistema de monitoramento de veículo
             "stream": False
         }
         r = requests.post(url, headers=headers, json=payload, timeout=25)
+        print(f"CHAT LLM url={url} model={model} status={r.status_code} raw={r.text[:600]}")
         if r.ok:
-            txt = parse_llm_response(r.text).strip()
+            try:
+                txt = parse_llm_response(r.text).strip()
+            except Exception as pe:
+                print(f"CHAT parse error: {pe} raw={r.text[:600]}")
+                raise
+            print(f"CHAT parsed txt len={len(txt)} txt={txt[:300]}")
+            if not txt:
+                # fallback: tenta extrair direto sem parser
+                print(f"CHAT txt vazio, raw completo: {r.text[:1000]}")
+                raise Exception(f"IA retornou resposta vazia (raw: {r.text[:200]})")
             return {"resposta": txt}
         else:
-            raise Exception(f"HTTP {r.status_code}: {r.text[:300]}")
+            raise Exception(f"HTTP {r.status_code}: {r.text[:500]}")
+    except HTTPException:
+        raise
     except Exception as e:
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erro na IA: {str(e)}")
 
 # --------- HELPER & ROTAS DE RELATÓRIOS GERENCIAIS ---------
