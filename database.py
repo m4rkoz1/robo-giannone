@@ -9,6 +9,7 @@ if DATABASE_URL.startswith("postgres://"):
 USE_POSTGRES = DATABASE_URL.startswith("postgresql://")
 
 SQLITE_PATH = os.getenv("SQLITE_PATH", "data/giannone.db")
+ADMIN_DEFAULT_PASSWORD = os.getenv("ADMIN_DEFAULT_PASSWORD", "admin123")
 
 def verify_password(plain_password, hashed_password):
     return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
@@ -128,7 +129,7 @@ def init_db():
     cnt = row["cnt"] if isinstance(row, dict) else row[0]
     if cnt == 0:
         cur.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-                    ("admin", get_password_hash("admin123"), "admin"))
+                    ("admin", get_password_hash(ADMIN_DEFAULT_PASSWORD), "admin"))
 
     cur.execute("SELECT COUNT(*) as cnt FROM config")
     row = cur.fetchone()

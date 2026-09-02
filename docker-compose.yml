@@ -1,5 +1,4 @@
 services:
-  # Opção 1: Postgres (RECOMENDADO - nunca perde dados)
   db:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -9,8 +8,6 @@ services:
       POSTGRES_DB: giannone
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
 
   app:
     build: .
@@ -18,17 +15,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Descomente para usar Postgres (recomendado):
       DATABASE_URL: postgresql://giannone:giannone123@db:5432/giannone
-      # SQLITE_PATH: /app/data/giannone.db  # usado se DATABASE_URL não estiver setado
+      SECRET_KEY: ${SECRET_KEY:-giannone_dev_secret_trocar_em_producao}
     volumes:
-      # Persiste SQLite caso não use Postgres
       - app_data:/app/data
     depends_on:
       - db
-
-  # Opção 2: Se quiser rodar APENAS com SQLite (sem Postgres), use:
-  # docker compose up app -- sem o serviço db, e remova DATABASE_URL acima
 
 volumes:
   pgdata:

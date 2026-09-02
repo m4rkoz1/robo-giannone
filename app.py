@@ -8,13 +8,16 @@ from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import os
 import jwt
 from models import ConfigUpdate
 from database import init_db, get_db_connection
 
-# Configurações de Segurança
-SECRET_KEY = "GIANNONE_SUPER_SECRET"
+# Configurações de Segurança - via env (EasyPanel > Environment)
+SECRET_KEY = os.getenv("SECRET_KEY", os.getenv("JWT_SECRET", "GIANNONE_SUPER_SECRET"))
 ALGORITHM = "HS256"
+if SECRET_KEY == "GIANNONE_SUPER_SECRET":
+    print("AVISO: SECRET_KEY usando valor padrão! Configure SECRET_KEY no EasyPanel > Environment para produção.")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 app = FastAPI(title="Agente Operacional Giannone Transportes")
@@ -170,8 +173,11 @@ async def create_user(username: str, role: str, current_user: dict = Depends(get
     try:
         conn.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", (username, password_hash, role))
         conn.commit()
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=400, detail="Usuário já existe.")
+    except Exception as e:
+        # Captura tanto sqlite3.IntegrityError quanto psycopg2.errors.UniqueViolation
+        if "UNIQUE" in str(e).upper() or "unique" in str(e).lower() or "already exists" in str(e).lower():
+            raise HTTPException(status_code=400, detail="Usuário já existe.")
+        raise
     finally:
         conn.close()
     return {"status": "Usuário criado. Senha padrão: giannone123"}
