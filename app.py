@@ -1051,19 +1051,22 @@ async def chat_ia(req: ChatRequest, current_user: dict = Depends(get_current_use
     # Top 10 veículos mais disponíveis no mês atual (compat: LIKE em vez de strftime, sem GROUP_CONCAT)
     mes_atual = date.today().strftime("%Y-%m")
     # Usa LIKE 'YYYY-MM%' que funciona em SQLite e Postgres (data_operacao é TEXT)
-    top_mes_rows = conn.execute("""
+    raw_top = conn.execute("""
         SELECT placa, COUNT(*) as disp_cnt FROM veiculos 
         WHERE data_operacao LIKE ? AND status = 'Disponível' 
         GROUP BY placa ORDER BY disp_cnt DESC LIMIT 10
     """, (f"{mes_atual}%",)).fetchall()
-    # Busca motoristas separadamente para evitar GROUP_CONCAT/STRING_AGG incompatível
-    for tm in top_mes_rows:
-        # tm é dict-like; adiciona motoristas via query auxiliar
+    # Normaliza para dict mutável e busca motoristas separadamente (evita GROUP_CONCAT/STRING_AGG incompatível)
+    top_mes_rows = []
+    for r in raw_top:
+        d = dict(r)
         try:
-            mot_rows = conn.execute("SELECT DISTINCT motorista FROM veiculos WHERE placa = ? AND data_operacao LIKE ?", (tm["placa"], f"{mes_atual}%")).fetchall()
-            tm["motoristas"] = ", ".join([r["motorista"] for r in mot_rows])
-        except Exception:
-            tm["motoristas"] = tm.get("motoristas", "")
+            mot_rows = conn.execute("SELECT DISTINCT motorista FROM veiculos WHERE placa = ? AND data_operacao LIKE ?", (d["placa"], f"{mes_atual}%")).fetchall()
+            d["motoristas"] = ", ".join([dict(x)["motorista"] for x in mot_rows])
+        except Exception as e:
+            print(f"Erro motoristas placa {d.get('placa')}: {e}")
+            d["motoristas"] = ""
+        top_mes_rows.append(d)
     
     top_mes_txt = ""
     for tm in top_mes_rows:
