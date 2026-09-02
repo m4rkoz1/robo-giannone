@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import jwt
 from models import ConfigUpdate
-from database import init_db
+from database import init_db, get_db_connection
 
 # Configurações de Segurança
 SECRET_KEY = "GIANNONE_SUPER_SECRET"
@@ -26,12 +26,7 @@ init_db()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# Funções Auxiliares de Banco e Auth
-def get_db_connection():
-    conn = sqlite3.connect("data/giannone.db")
-    conn.row_factory = sqlite3.Row
-    return conn
-
+# Funções Auxiliares de Auth (DB vem de database.py)
 def verify_password(plain_password, hashed_password):
     import hashlib
     return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password

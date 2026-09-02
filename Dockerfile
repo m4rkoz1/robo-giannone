@@ -1,18 +1,18 @@
-# Usa uma imagem oficial do Python, bem leve (alpine ou slim)
 FROM python:3.12-slim
 
-# Define a pasta de trabalho dentro do container
 WORKDIR /app
 
-# Copia os arquivos de configuração de dependências e instala
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia todo o projeto para a pasta /app
 COPY . .
 
-# Expõe a porta que o FastApi vai rodar
+# Garante que a pasta de dados existe e tem permissão
+RUN mkdir -p /app/data && chmod 777 /app/data
+
 EXPOSE 8000
 
-# Executa as migrações/criação do banco E liga o servidor
+# VOLUME para persistência do SQLite (quando não usar Postgres)
+VOLUME ["/app/data"]
+
 CMD ["sh", "-c", "python database.py && uvicorn app:app --host 0.0.0.0 --port 8000"]
