@@ -271,8 +271,19 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
             raise Exception(f"Nenhum endpoint de chats respondeu. Último erro: {last_err} | Base: {base} Session: {session} (verifique se a sessão existe e está STARTED na WAHA)")
         if isinstance(chats, dict): chats = chats.get("data", [])
         
+        # Helper para extrair ID string (WAHA PLUS retorna id como dict)
+        def _extract_id(c):
+            v = c.get("id", "")
+            if isinstance(v, dict):
+                return v.get("_serialized") or v.get("id") or v.get("value") or str(v)
+            return str(v)
+        def _extract_name(c):
+            for k in ("name","subject","topic","formattedTitle","pushName"):
+                v = c.get(k)
+                if isinstance(v, str) and v.strip(): return v.strip()
+            return ""
         # Filtra apenas grupos
-        grupo_chats = [c for c in chats if "@g.us" in str(c.get("id", ""))]
+        grupo_chats = [c for c in chats if "@g.us" in _extract_id(c)]
         
         # Timestamp de 24h atrás
         agora = datetime.now(timezone(timedelta(hours=-3)))
@@ -280,12 +291,12 @@ async def sync_history_waha(current_user: dict = Depends(get_current_user)):
         
         # 2. Para cada grupo, busca mensagens recentes
         for chat in grupo_chats:
-            chat_id = chat.get("id", "")
+            chat_id = _extract_id(chat)
             if not chat_id: continue
 
             # Preenche nome do grupo se disponível no objeto do chat
-            chat_name = chat.get("name") or chat.get("subject") or chat.get("topic")
-            if chat_name and isinstance(chat_name, str) and chat_name.strip():
+            chat_name = _extract_name(chat)
+            if chat_name:
                 nome_limpo = chat_name.strip()
                 CACHE_GRUPOS[chat_id] = nome_limpo
                 sufixo_4 = chat_id.split('@')[0][-4:]
