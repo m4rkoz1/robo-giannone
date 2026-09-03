@@ -752,7 +752,7 @@
                                 <a class="wpp-link" href="https://wa.me/${v.telefone}" target="_blank">
                                     <span>📱</span> ${v.telefone}
                                 </a>
-                                <span class="badge-placa">${v.placa || '⚠️ SEM PLACA'}</span>
+                                <span class="badge-placa">${v.placa ? (v.placa.length < 7 ? v.placa + ' ⚠️' : v.placa) : '⚠️ SEM PLACA'}</span>
                             </div>
                             <div class="msg-box">
                                 "${v.mensagem_original}"

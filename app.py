@@ -607,6 +607,25 @@ def normalizar_placa(raw):
 def placa_valida(p):
     return bool(normalizar_placa(p))
 
+# Palavras comuns que NUNCA são tentativa de placa (saudações, gírias, etc.)
+IGNORAR_TENTATIVA = {
+    "bom", "boa", "por", "com", "que", "pra", "uma", "dia", "nao", "sim",
+    "das", "dos", "nas", "nos", "tem", "foi", "vai", "vou", "fui", "vem",
+    "seu", "sou", "sem", "ate", "tou", "tao", "meu", "sua", "ola", "opa",
+    "blz", "eai", "vlw", "kkk", "obg",
+}
+
+def extrair_tentativa_placa(texto):
+    """Quando não há placa completa, devolve o que o usuário escreveu como
+    tentativa (ex: 'ALS' em 'estou disp ALS'). Pega a ÚLTIMA palavra isolada
+    de 3 letras fora da blacklist — placa costuma vir no fim da mensagem.
+    Retorna '' se não houver candidata (aí exibe SEM PLACA)."""
+    if not texto:
+        return ""
+    toks = re.findall(r"\b([A-Za-z]{3})\b", texto)
+    cands = [t.upper() for t in toks if t.lower() not in IGNORAR_TENTATIVA]
+    return cands[-1] if cands else ""
+
 def extrair_placas(texto):
     """Extrai placas BR válidas (antiga ABC1234 / Mercosul ABC1D23).
     NÃO inventa placa: se não houver padrão válido, retorna []."""
@@ -968,22 +987,26 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
             status_heuristico = "Disponível"
             
         # Extração de placas: apenas padrão BR válido (antiga/Mercosul).
-        # Se não houver placa na mensagem, NÃO inventa (sem fallback de
-        # 3 letras) — deixa vazio para disparar o auto-responder.
+        # Sem placa completa: guarda a tentativa do jeito que o usuário
+        # escreveu (ex: "ALS") para constar na lista — e o auto-responder
+        # pede a placa inteira.
         placas_encontradas = extrair_placas(texto_original)
 
         if placas_encontradas:
             for pl in placas_encontradas:
                 itens_extraidos.append({"status": status_heuristico, "placa": pl})
         else:
-            itens_extraidos.append({"status": status_heuristico, "placa": ""})
+            tentativa = extrair_tentativa_placa(texto_original)
+            itens_extraidos.append({"status": status_heuristico, "placa": tentativa})
 
         log_entry["resultado"] = f"Heurística extraiu {len(itens_extraidos)} item(ns)"
 
     # Se não houve placa em nenhum item: responde CITANDO a mensagem do autor
     # (notifica mesmo com grupo silenciado) e SALVA do jeito que foi escrito,
     # para constar na lista até a pessoa mandar a placa certa.
-    tem_alguma_placa = any(bool(it.get("placa")) for it in itens_extraidos)
+    # Só placa COMPLETA (7 chars) evita o alerta; tentativa parcial ("ALS")
+    # dispara o pedido da placa inteira mas é salva como foi escrita.
+    tem_alguma_placa = any(placa_valida(it.get("placa")) for it in itens_extraidos)
     sem_placa = not tem_alguma_placa
     if sem_placa:
         if not is_sync:
@@ -1061,7 +1084,11 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         conn.commit()
         log_entry["etapa"] = "salvo"
         if sem_placa:
-            log_entry["resultado"] = f"Salvo sem placa (texto original mantido) para {motorista} — aguardando placa inteira"
+            parcial = itens_extraidos[0].get("placa") if itens_extraidos else ""
+            if parcial:
+                log_entry["resultado"] = f"Salvo tentativa '{parcial}' para {motorista} — aguardando placa inteira"
+            else:
+                log_entry["resultado"] = f"Salvo sem placa (texto original mantido) para {motorista} — aguardando placa inteira"
         else:
             log_entry["resultado"] = f"{salvos} veículo(s) salvo(s) para {motorista}"
         PROCESS_LOG.append(log_entry)
