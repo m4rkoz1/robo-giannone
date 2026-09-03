@@ -1043,16 +1043,29 @@ async def test_llm(current_user: dict = Depends(get_current_user)):
     
     try:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        base_msgs = [{"role": "user", "content": "Responda apenas com a frase: IA funcionando corretamente."}]
         payload = {
             "model": model,
-            "messages": [{"role": "user", "content": "Responda apenas com a frase: IA funcionando corretamente."}],
-            "max_tokens": 30,
-            "temperature": 0.1,
+            "messages": base_msgs,
+            "max_tokens": 100,
+            "max_completion_tokens": 100,
+            "temperature": 0.7,
             "stream": False
         }
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        print(f"LLM TEST url={url} model={model} status={r.status_code} raw={r.text[:800]}")
         if r.ok:
-            txt = parse_llm_response(r.text).strip()
+            try:
+                txt = parse_llm_response(r.text).strip()
+            except Exception as pe:
+                # retry sem temperature e sem max_tokens (alguns modelos/router rejeitam)
+                print(f"LLM TEST retry após parse falhar: {pe}")
+                payload2 = {"model": model, "messages": base_msgs, "stream": False}
+                r2 = requests.post(url, headers=headers, json=payload2, timeout=20)
+                print(f"LLM TEST retry status={r2.status_code} raw={r2.text[:800]}")
+                if not r2.ok:
+                    return {"status": "error", "detail": f"HTTP {r2.status_code}: {r2.text[:300]}", "url": url}
+                txt = parse_llm_response(r2.text).strip()
             return {"status": "ok", "model": model, "test_response": txt, "url": url}
         else:
             err_msg = f"HTTP {r.status_code}"
@@ -1184,31 +1197,60 @@ Sua função é responder perguntas sobre o sistema de monitoramento de veículo
 - Use listas e estrutura quando necessário para facilitar a leitura.
 """
     
+    def _post(payload):
+        rr = requests.post(url, headers=headers, json=payload, timeout=30)
+        print(f"CHAT LLM url={url} model={model} status={rr.status_code} raw={rr.text[:800]}")
+        return rr
+
     try:
         url = get_llm_url(config)
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        msgs = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": req.pergunta}
+        ]
         payload = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": req.pergunta}
-            ],
+            "messages": msgs,
             "max_tokens": 1200,
+            "max_completion_tokens": 1200,
+            "temperature": 0.7,
             "stream": False
         }
-        r = requests.post(url, headers=headers, json=payload, timeout=25)
-        print(f"CHAT LLM url={url} model={model} status={r.status_code} raw={r.text[:600]}")
+        r = _post(payload)
         if r.ok:
             try:
                 txt = parse_llm_response(r.text).strip()
             except Exception as pe:
-                print(f"CHAT parse error: {pe} raw={r.text[:600]}")
-                raise
+                print(f"CHAT parse error (tentativa 1): {pe}")
+                # Tentativa 2: sem temperature/max_tokens (alguns routers rejeitam)
+                # e com system fundido no user (alguns modelos free só aceitam user)
+                merged = system_prompt + "\n\nPergunta do usuário: " + req.pergunta
+                payload2 = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": merged}],
+                    "stream": False
+                }
+                r2 = _post(payload2)
+                if not r2.ok:
+                    raise Exception(f"HTTP {r2.status_code}: {r2.text[:500]}")
+                try:
+                    txt = parse_llm_response(r2.text).strip()
+                except Exception as pe2:
+                    print(f"CHAT parse error (tentativa 2): {pe2} raw={r2.text[:800]}")
+                    # modelo retornou 200 mas content vazio -> explica causa provável
+                    raise Exception(
+                        f"O modelo '{model}' retornou resposta vazia (content:\"\" "
+                        f"finish_reason:stop). Isso é limite/bug do modelo free ou do router, "
+                        f"não do app. Troque o modelo (ex: google/gemini-2.5-flash-lite ou "
+                        f"llama-3.3-70b-versatile) ou aumente o limite no router. Raw: {r2.text[:300]}"
+                    )
             print(f"CHAT parsed txt len={len(txt)} txt={txt[:300]}")
             if not txt:
-                # fallback: tenta extrair direto sem parser
-                print(f"CHAT txt vazio, raw completo: {r.text[:1000]}")
-                raise Exception(f"IA retornou resposta vazia (raw: {r.text[:200]})")
+                raise Exception(
+                    f"O modelo '{model}' retornou resposta vazia. Troque o modelo nas "
+                    f"Configurações (o Testar IA usa prompt mínimo e também falharia). Raw: {r.text[:300]}"
+                )
             return {"resposta": txt}
         else:
             raise Exception(f"HTTP {r.status_code}: {r.text[:500]}")
