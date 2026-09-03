@@ -670,30 +670,66 @@ def parse_llm_response(text: str) -> str:
                 return text
             raise ValueError(f"Resposta inválida da IA: {text[:300]}")
             
+    def _content_to_str(v):
+        # content pode ser string, lista de blocos [{"type":"text","text":"..."}] ou None
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v
+        if isinstance(v, list):
+            parts = []
+            for b in v:
+                if isinstance(b, str):
+                    parts.append(b)
+                elif isinstance(b, dict):
+                    # OpenRouter/Anthropic style: {"type":"text","text":"..."}
+                    for k in ("text", "content", "value"):
+                        if isinstance(b.get(k), str) and b[k].strip():
+                            parts.append(b[k])
+                            break
+            return "".join(parts)
+        return str(v)
+
     if isinstance(data, dict):
         # Alguns provedores retornam {"response": "..."} ou {"content": "..."}
         if not data.get("choices") and data.get("response"):
             return str(data["response"])
         if not data.get("choices") and data.get("content"):
             return str(data["content"])
+        # Ollama style: {"message": {"content": "..."}}
+        if not data.get("choices") and isinstance(data.get("message"), dict):
+            t = _content_to_str(data["message"].get("content")).strip()
+            if t: return t
         choices = data.get("choices", [])
         if choices:
             c = choices[0]
             if isinstance(c, dict):
-                msg = c.get("message", {})
-                if isinstance(msg, dict) and "content" in msg and msg["content"]:
-                    return str(msg["content"])
-                delta = c.get("delta", {})
-                if isinstance(delta, dict) and "content" in delta and delta["content"]:
-                    return str(delta["content"])
+                for key in ("message", "delta"):
+                    m = c.get(key, {})
+                    if isinstance(m, dict):
+                        t = _content_to_str(m.get("content")).strip()
+                        if t: return t
+                        # alguns modelos (ex: deepseek, muse-spark via router)
+                        # colocam a resposta em reasoning_content/reasoning
+                        t = _content_to_str(m.get("reasoning_content")).strip()
+                        if t: return t
+                        t = _content_to_str(m.get("reasoning")).strip()
+                        if t: return t
                 if c.get("text"):
-                    return str(c["text"])
-                # fallback para qualquer campo string
-                for k in ("content","text","response"):
-                    if c.get(k): return str(c[k])
-                if "text" in c and c["text"] is not None:
-                    return str(c["text"])
-    raise ValueError(f"Formato de resposta inesperado da IA: {text[:150]}")
+                    t = _content_to_str(c.get("text")).strip()
+                    if t: return t
+                # fallback para qualquer campo string no choice
+                for k in ("content", "text", "response", "output_text", "output"):
+                    if c.get(k):
+                        t = _content_to_str(c.get(k)).strip()
+                        if t: return t
+                # choice existe mas veio com content vazio/nulo -> erro explicativo
+                # (antes caía no "Formato inesperado" genérico)
+                raise ValueError(
+                    f"IA retornou choice sem conteúdo (model={data.get('model')} "
+                    f"finish_reason={c.get('finish_reason')} keys={list(c.keys())}): {text[:500]}"
+                )
+    raise ValueError(f"Formato de resposta inesperado da IA: {text[:500]}")
 
 def get_llm_url(config):
     base = (config.get("llm_base_url") or "").strip().rstrip("/")
