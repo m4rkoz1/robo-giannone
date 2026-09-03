@@ -623,8 +623,10 @@ def extrair_placas(texto):
             achadas.append(norm)
     return achadas
 
-def enviar_reposta(jid, texto, config):
-    """Envia auto-resposta via WAHA. Retorna (ok: bool, detalhe: str)."""
+def enviar_reposta(jid, texto, config, reply_to=None):
+    """Envia auto-resposta via WAHA. Retorna (ok: bool, detalhe: str).
+    reply_to = id da mensagem original: a resposta a CITA (quote), assim o
+    autor é notificado mesmo com o grupo silenciado."""
     if not config.get('evo_url') or not config.get('evo_instance'):
         msg = "WAHA não configurada (evo_url/evo_instance vazios)."
         print(f"Auto-resposta não enviada: {msg}")
@@ -646,14 +648,18 @@ def enviar_reposta(jid, texto, config):
         headers["apikey"] = key
 
     # 1. Endpoint padrão WAHA (CORE e PLUS): POST /api/sendText
-    tentativas.append((
-        f"{url}/api/sendText",
-        {"session": session, "chatId": chat_id, "text": texto},
-    ))
+    # replyTo cita a mensagem original -> notifica o autor mesmo com grupo mutado
+    p1 = {"session": session, "chatId": chat_id, "text": texto}
+    if reply_to:
+        p1["replyTo"] = reply_to
+    tentativas.append((f"{url}/api/sendText", p1))
     # 2. Variante com chatId encodado no path (algumas builds PLUS)
+    p2 = {"text": texto, "session": session}
+    if reply_to:
+        p2["replyTo"] = reply_to
     tentativas.append((
         f"{url}/api/{session}/chats/{urllib.parse.quote(chat_id, safe='')}/messages",
-        {"text": texto, "session": session},
+        p2,
     ))
 
     last = ""
@@ -687,8 +693,8 @@ def enviar_reposta(jid, texto, config):
     return False, last or "falha desconhecida"
 
 # alias com grafia correta
-def enviar_resposta(jid, texto, config):
-    return enviar_reposta(jid, texto, config)
+def enviar_resposta(jid, texto, config, reply_to=None):
+    return enviar_reposta(jid, texto, config, reply_to)
 
 import json
 
@@ -974,23 +980,26 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
 
         log_entry["resultado"] = f"Heurística extraiu {len(itens_extraidos)} item(ns)"
 
-    # Se não houve placa em nenhum item, responde pedindo a placa
+    # Se não houve placa em nenhum item: responde CITANDO a mensagem do autor
+    # (notifica mesmo com grupo silenciado) e SALVA do jeito que foi escrito,
+    # para constar na lista até a pessoa mandar a placa certa.
     tem_alguma_placa = any(bool(it.get("placa")) for it in itens_extraidos)
-    if not tem_alguma_placa:
+    sem_placa = not tem_alguma_placa
+    if sem_placa:
         if not is_sync:
             msg_alerta = (config.get("msg_erro_placa") or "").strip()
             if not msg_alerta:
                 msg_alerta = "⚠️ Ops, faltou a *PLACA INTEIRA*!\nPara registrar seu status na Giannone, mande novamente a mensagem com a *placa completa do veículo* (7 caracteres, ex: ABC1234 ou ABC1D23). Sem a placa inteira não consigo registrar."
-            
-            enviado, detalhe = enviar_reposta(remote_jid, msg_alerta, config)
+
+            enviado, detalhe = enviar_reposta(remote_jid, msg_alerta, config, reply_to=message_id or None)
             log_entry["etapa"] = "alerta_placa"
             if enviado:
-                log_entry["resultado"] = "Auto-resposta enviada"
+                log_entry["resultado"] = "Auto-resposta enviada (citando a mensagem do autor)"
             else:
                 log_entry["resultado"] = "Auto-resposta FALHOU: " + (detalhe or "verifique evo_url/instância")
-            PROCESS_LOG.append(log_entry)
+            PROCESS_LOG.append(dict(log_entry))
             if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
-        return
+        # NÃO retorna: continua e salva o texto original na lista (placa vazia)
 
     telefone = telefone_bruto.split("@")[0].split(":")[0]  
     
@@ -1015,20 +1024,32 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
     salvos = 0
     try:
         for item in itens_extraidos:
-            placa = item.get("placa")
+            placa = item.get("placa") or ""
             status_veiculo = item.get("status", "Disponível")
-            if not placa: continue
 
-            # Chaveia por (data_operacao, telefone, placa) para permitir múltiplos veículos por motorista no mesmo dia
-            existente = conn.execute(
-                "SELECT id FROM veiculos WHERE data_operacao=? AND telefone=? AND placa=?", 
-                (data_operacao, telefone, placa)
-            ).fetchone()
-            
+            if placa:
+                # Chaveia por (data_operacao, telefone, placa) para permitir múltiplos veículos por motorista no mesmo dia
+                existente = conn.execute(
+                    "SELECT id FROM veiculos WHERE data_operacao=? AND telefone=? AND placa=?",
+                    (data_operacao, telefone, placa)
+                ).fetchone()
+            else:
+                # Sem placa: salva do jeito que foi escrito. Evita duplicar a
+                # mesma mensagem (chaveia por message_id quando disponível).
+                if message_id:
+                    existente = conn.execute(
+                        "SELECT id FROM veiculos WHERE message_id=?", (message_id,)
+                    ).fetchone()
+                else:
+                    existente = conn.execute(
+                        "SELECT id FROM veiculos WHERE data_operacao=? AND telefone=? AND (placa IS NULL OR placa='') AND mensagem_original=?",
+                        (data_operacao, telefone, texto_original)
+                    ).fetchone()
+
             if existente:
                 conn.execute(
-                    "UPDATE veiculos SET grupo=?, horario_mensagem=?, mensagem_original=?, status=?, message_id=? WHERE id=?", 
-                    (grupo, horario_mensagem, texto_original, status_veiculo, message_id, existente["id"])
+                    "UPDATE veiculos SET grupo=?, horario_mensagem=?, mensagem_original=?, status=?, message_id=?, placa=? WHERE id=?",
+                    (grupo, horario_mensagem, texto_original, status_veiculo, message_id, placa, existente["id"])
                 )
             else:
                 conn.execute(
@@ -1036,10 +1057,13 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
                     (data_operacao, motorista, telefone, placa, grupo, horario_mensagem, texto_original, status_veiculo, message_id)
                 )
             salvos += 1
-            
+
         conn.commit()
         log_entry["etapa"] = "salvo"
-        log_entry["resultado"] = f"{salvos} veículo(s) salvo(s) para {motorista}"
+        if sem_placa:
+            log_entry["resultado"] = f"Salvo sem placa (texto original mantido) para {motorista} — aguardando placa inteira"
+        else:
+            log_entry["resultado"] = f"{salvos} veículo(s) salvo(s) para {motorista}"
         PROCESS_LOG.append(log_entry)
         if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
     except Exception as e:
