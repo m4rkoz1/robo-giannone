@@ -154,6 +154,16 @@ def init_db():
             cur.execute(sql)
         except Exception:
             pass
+
+    # Migração de dados: atualiza mensagem padrão do auto-responder que
+    # permitia placa parcial ("ou 3 primeiras letras") para exigir a PLACA INTEIRA.
+    # Só altera quem ainda tem o texto padrão antigo; mensagem customizada é preservada.
+    try:
+        old_msg = "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso."
+        new_msg = "⚠️ Ops, faltou a *PLACA INTEIRA*!\nPara registrar seu status na Giannone, mande novamente a mensagem com a *placa completa do veículo* (7 caracteres, ex: ABC1234 ou ABC1D23). Sem a placa inteira não consigo registrar."
+        cur.execute("UPDATE config SET msg_erro_placa = ? WHERE msg_erro_placa = ?", (new_msg, old_msg))
+    except Exception:
+        pass
     conn.commit()
     conn.close()
     print(f"Banco inicializado: {'Postgres' if USE_POSTGRES else 'SQLite em ' + SQLITE_PATH}")

@@ -813,7 +813,7 @@ def analisar_mensagem_com_ia(texto, config):
         "O motorista pode informar sobre um ou mais veículos, placas e status (\"disponível\" ou \"indisponível\").\n"
         "Responda APENAS com um array JSON válido (sem markdown de formatação) de objetos com as chaves:\n"
         "\"status\": \"Disponível\" OU \"Indisponível\" (caso a mensagem não seja sobre disponibilidade, coloque null).\n"
-        "\"placa\": a placa com 7 digitos limpos, ex: \"ABC1234\" ou \"PZH0000\". Caso a pessoa mande só 3 letras isoladas parecendo ser a placa (ex: \"estou disp PZH\"), coloque as 3 letras na placa. Se não houver placa, retorne null.\n\n"
+        "\"placa\": a placa COMPLETA com 7 caracteres limpos, ex: \"ABC1234\" ou \"PZH1A23\" (padrão antigo ou Mercosul). Se a pessoa mandar só parte da placa (ex: só \"PZH\") ou não houver placa completa, retorne null — NUNCA invente nem complete dígitos.\n\n"
         "Exemplo de resposta para 2 veículos:\n"
         "[{\"status\": \"Disponível\", \"placa\": \"ABC1234\"}, {\"status\": \"Indisponível\", \"placa\": \"XYZ9876\"}]\n\n"
         f"Mensagem do Motorista: \"{texto}\"\n"
@@ -932,13 +932,10 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
             for item in itens_ia:
                 st = item.get("status")
                 pl_raw = (item.get("placa") or "").strip().upper()
-                # Valida placa da IA: aceita padrão BR completo ou 3 letras
-                # isoladas (parcial). Qualquer outra coisa é descartada para
-                # não salvar "placa" inventada de parte da mensagem.
+                # Valida placa da IA: SOMENTE padrão BR completo (7 chars).
+                # Parcial (3 letras) ou qualquer outra coisa é descartada —
+                # cai no auto-responder pedindo a PLACA INTEIRA.
                 pl = normalizar_placa(pl_raw)
-                if not pl and re.fullmatch(r"[A-Z]{3}", pl_raw) \
-                        and re.search(rf"\b{pl_raw}\b", texto_original.upper()):
-                    pl = pl_raw
                 if st and pl:
                     itens_extraidos.append({"status": st, "placa": pl})
             if itens_extraidos:
@@ -983,7 +980,7 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         if not is_sync:
             msg_alerta = (config.get("msg_erro_placa") or "").strip()
             if not msg_alerta:
-                msg_alerta = "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso."
+                msg_alerta = "⚠️ Ops, faltou a *PLACA INTEIRA*!\nPara registrar seu status na Giannone, mande novamente a mensagem com a *placa completa do veículo* (7 caracteres, ex: ABC1234 ou ABC1D23). Sem a placa inteira não consigo registrar."
             
             enviado, detalhe = enviar_reposta(remote_jid, msg_alerta, config)
             log_entry["etapa"] = "alerta_placa"
