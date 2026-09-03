@@ -580,53 +580,115 @@ async def sync_grupos_waha(current_user: dict = Depends(get_current_user)):
         
     return {"status": "ok", "grupos_atualizados": atualizados}
 
+def _corrige_digito(ch):
+    return {'o': '0', 'O': '0', 'i': '1', 'I': '1', 'l': '1', 'L': '1'}.get(ch, ch)
+
+def normalizar_placa(raw):
+    """Limpa e normaliza candidata a placa. Retorna '' se inválida."""
+    if not raw or not isinstance(raw, str):
+        return ""
+    c = raw.strip().upper().replace("-", "").replace(" ", "")
+    if len(c) != 7 or not c[:3].isalpha():
+        return ""
+    letras, resto = c[:3], c[3:]
+    if len(resto) != 4:
+        return ""
+    # Modelo antigo: ABC1234 (4 dígitos, com correção OCR o->0, i/l->1)
+    dig = "".join(_corrige_digito(x) for x in resto)
+    if dig.isdigit():
+        return letras + dig
+    # Mercosul: ABC1D23 (dígito, letra, 2 dígitos)
+    d0, letra_meio = _corrige_digito(resto[0]), resto[1]
+    d2, d3 = _corrige_digito(resto[2]), _corrige_digito(resto[3])
+    if d0.isdigit() and letra_meio.isalpha() and d2.isdigit() and d3.isdigit():
+        return letras + d0 + letra_meio + d2 + d3
+    return ""
+
+def placa_valida(p):
+    return bool(normalizar_placa(p))
+
+def extrair_placas(texto):
+    """Extrai placas BR válidas (antiga ABC1234 / Mercosul ABC1D23).
+    NÃO inventa placa: se não houver padrão válido, retorna []."""
+    if not texto:
+        return []
+    t = texto.upper()
+    # Aceita hífen/espaço opcional: ABC-1234, ABC 1234, ABC-1D23
+    padrao = re.compile(r"\b([A-Z]{3})[-\s]?(\d[A-Z0-9]\d{2}|\d{4})\b")
+    achadas = []
+    for m in padrao.finditer(t):
+        cand = m.group(1) + m.group(2)
+        norm = normalizar_placa(cand)
+        if norm and norm not in achadas:
+            achadas.append(norm)
+    return achadas
+
 def enviar_reposta(jid, texto, config):
+    """Envia auto-resposta via WAHA. Retorna (ok: bool, detalhe: str)."""
     if not config.get('evo_url') or not config.get('evo_instance'):
-        print("Auto-resposta não enviada: WAHA/Evolution não configurados.")
-        return False
-    
+        msg = "WAHA não configurada (evo_url/evo_instance vazios)."
+        print(f"Auto-resposta não enviada: {msg}")
+        return False, msg
+
     url = config['evo_url'].rstrip('/')
     session = config['evo_instance']
     key = (config.get('evo_apikey') or "").strip()
-    
+
     chat_id = jid
     if "@" not in chat_id:
         chat_id = f"{chat_id}@c.us"
-    
-    # 1. Tenta disparar resposta para WAHA API (POST /api/sendText)
-    try:
-        req_url = f"{url}/api/sendText"
-        headers = {"accept": "application/json", "Content-Type": "application/json"}
-        if key:
-            headers["X-Api-Key"] = key
-            headers["apikey"] = key
-        payload = {"session": session, "chatId": chat_id, "text": texto}
-        r = requests.post(req_url, headers=headers, json=payload, timeout=6)
-        if r.ok:
-            print(f"Auto-resposta WAHA enviada com sucesso para {chat_id}")
-            return True
-        else:
-            print(f"WAHA sendText HTTP {r.status_code}: {r.text[:150]}")
-    except Exception as e:
-        print("Erro WAHA sendText:", e)
 
-    # 2. Fallback para Evolution API (POST /message/sendText/{session})
+    import urllib.parse
+    tentativas = []
+    headers = {"accept": "application/json", "Content-Type": "application/json"}
+    if key:
+        headers["X-Api-Key"] = key
+        headers["apikey"] = key
+
+    # 1. Endpoint padrão WAHA (CORE e PLUS): POST /api/sendText
+    tentativas.append((
+        f"{url}/api/sendText",
+        {"session": session, "chatId": chat_id, "text": texto},
+    ))
+    # 2. Variante com chatId encodado no path (algumas builds PLUS)
+    tentativas.append((
+        f"{url}/api/{session}/chats/{urllib.parse.quote(chat_id, safe='')}/messages",
+        {"text": texto, "session": session},
+    ))
+
+    last = ""
+    for req_url, payload in tentativas:
+        try:
+            r = requests.post(req_url, headers=headers, json=payload, timeout=8)
+            if r.ok:
+                print(f"Auto-resposta WAHA enviada para {chat_id} via {req_url}")
+                return True, "enviada"
+            last = f"{req_url} -> HTTP {r.status_code}: {r.text[:150]}"
+            print(f"Auto-resposta falhou: {last}")
+        except Exception as e:
+            last = f"{req_url} -> {type(e).__name__}: {e}"
+            print(f"Erro auto-resposta: {last}")
+
+    # 3. Fallback Evolution API (POST /message/sendText/{session})
     try:
         req_url = f"{url}/message/sendText/{session}"
-        headers = {"Content-Type": "application/json"}
+        h2 = {"Content-Type": "application/json"}
         if key:
-            headers["apikey"] = key
-        payload = {"number": jid, "text": texto}
-        r = requests.post(req_url, headers=headers, json=payload, timeout=6)
+            h2["apikey"] = key
+        r = requests.post(req_url, headers=h2, json={"number": jid, "text": texto}, timeout=8)
         if r.ok:
-            print(f"Auto-resposta Evolution enviada com sucesso para {jid}")
-            return True
-        else:
-            print(f"Evolution sendText HTTP {r.status_code}: {r.text[:150]}")
+            print(f"Auto-resposta Evolution enviada para {jid}")
+            return True, "enviada via Evolution"
+        last = f"{req_url} -> HTTP {r.status_code}: {r.text[:150]}"
     except Exception as e:
-        print("Erro Evolution sendText:", e)
+        last = f"Evolution -> {type(e).__name__}: {e}"
 
-    return False
+    print(f"Auto-resposta FALHOU para {chat_id}. Último erro: {last}")
+    return False, last or "falha desconhecida"
+
+# alias com grafia correta
+def enviar_resposta(jid, texto, config):
+    return enviar_reposta(jid, texto, config)
 
 import json
 
@@ -869,8 +931,15 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         if itens_ia:
             for item in itens_ia:
                 st = item.get("status")
-                pl = (item.get("placa") or "").strip().upper()
-                if st and pl:  # Apenas aceita item da IA se tiver STATUS E PLACA VÁLIDA
+                pl_raw = (item.get("placa") or "").strip().upper()
+                # Valida placa da IA: aceita padrão BR completo ou 3 letras
+                # isoladas (parcial). Qualquer outra coisa é descartada para
+                # não salvar "placa" inventada de parte da mensagem.
+                pl = normalizar_placa(pl_raw)
+                if not pl and re.fullmatch(r"[A-Z]{3}", pl_raw) \
+                        and re.search(rf"\b{pl_raw}\b", texto_original.upper()):
+                    pl = pl_raw
+                if st and pl:
                     itens_extraidos.append({"status": st, "placa": pl})
             if itens_extraidos:
                 log_entry["resultado"] = f"IA extraiu {len(itens_extraidos)} veículo(s)"
@@ -895,22 +964,10 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
         if not status_heuristico:
             status_heuristico = "Disponível"
             
-        # Extração de placas via regex (busca todas na mensagem)
-        placas_encontradas = []
-        padrao_forte = re.compile(r"\b([A-Za-z]{3})[-\s]*([A-Za-z0-9]{4})\b")
-        placas = padrao_forte.findall(texto_original)
-        
-        for p_letra, p_num in placas:
-            p_num_corrigido = p_num.replace('o', '0').replace('O', '0').replace('i', '1').replace('I', '1').replace('l', '1').replace('L', '1')
-            if any(char.isdigit() for char in p_num_corrigido):
-                placas_encontradas.append((p_letra + p_num_corrigido).upper())
-                
-        if not placas_encontradas:
-            tres_letras = re.findall(r"\b([a-zA-Z]{3})\b", texto_original)
-            blacklist = ["bom", "boa", "por", "com", "que", "pra", "uma", "dia", "não", "nao", "sim", "das", "dos", "nas", "nos", "tem", "foi", "vai", "vou", "fui", "vem", "seu"]
-            tres_letras_validas = [p for p in tres_letras if p.lower() not in blacklist]
-            if tres_letras_validas:
-                placas_encontradas.append(tres_letras_validas[0].upper())
+        # Extração de placas: apenas padrão BR válido (antiga/Mercosul).
+        # Se não houver placa na mensagem, NÃO inventa (sem fallback de
+        # 3 letras) — deixa vazio para disparar o auto-responder.
+        placas_encontradas = extrair_placas(texto_original)
 
         if placas_encontradas:
             for pl in placas_encontradas:
@@ -928,9 +985,12 @@ def processar_mensagem_webhook(payload: dict, is_sync: bool = False):
             if not msg_alerta:
                 msg_alerta = "⚠️ Ops, faltou uma informação!\nPara registrar corretamente seu status na Giannone, mande novamente a mensagem e *informe a PLACA completa* (ou 3 primeiras letras) junto com seu aviso."
             
-            enviado = enviar_reposta(remote_jid, msg_alerta, config)
+            enviado, detalhe = enviar_reposta(remote_jid, msg_alerta, config)
             log_entry["etapa"] = "alerta_placa"
-            log_entry["resultado"] = f"Auto-resposta disparada ({'sucesso' if enviado else 'falha envio WAHA'})"
+            if enviado:
+                log_entry["resultado"] = "Auto-resposta enviada"
+            else:
+                log_entry["resultado"] = "Auto-resposta FALHOU: " + (detalhe or "verifique evo_url/instância")
             PROCESS_LOG.append(log_entry)
             if len(PROCESS_LOG) > 30: PROCESS_LOG.pop(0)
         return
